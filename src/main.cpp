@@ -1,6 +1,10 @@
+#include <Arduino.h>
 #include <Wire.h>
 #include <SPI.h>
 #include <Adafruit_BMP280.h>
+
+const int pinoDO = 4;     // trocado
+const int pinoLED = 13;   // ajuste conforme seu circuito
 
 #define BMP_SCK  (13)
 #define BMP_MISO (12)
@@ -12,7 +16,41 @@ Adafruit_BMP280 bmp; // I2C
 //Adafruit_BMP280 bmp(BMP_CS, BMP_MOSI, BMP_MISO,  BMP_SCK);
 
 void setup() {
-  Serial.begin(9600);
+  pinMode(pinoDO, INPUT);
+  pinMode(pinoLED, OUTPUT);
+  Serial.begin(9600); // ESP32 usa melhor 115200
+}
+void SensorLuminosidade(){
+
+int estado = digitalRead(pinoDO);
+
+  if (estado == LOW) { // geralmente invertido
+    digitalWrite(pinoLED, HIGH); // LED ON
+    Serial.println("Luz Detectada");
+  } else {
+    digitalWrite(pinoLED, LOW); // LED OFF
+    Serial.println("Escuro");
+  }
+
+  delay(200);
+
+}
+void SensorUv() {
+  float sensorVoltage; 
+  float sensorValue;
+ 
+  sensorValue = analogRead(36);
+  sensorVoltage = sensorValue/4095*3.3;
+  Serial.print("sensor reading = ");
+  Serial.print(sensorValue);
+  Serial.println("");
+  Serial.print("sensor voltage = ");
+  Serial.print(sensorVoltage);
+  Serial.println(" V");
+  delay(1000);
+}
+void ConfigSensorPressao(){
+
   while ( !Serial ) delay(100);   // wait for native usb
   Serial.println(F("BMP280 test"));
   unsigned status;
@@ -36,17 +74,18 @@ void setup() {
                   Adafruit_BMP280::FILTER_X16,      /* Filtering. */
                   Adafruit_BMP280::STANDBY_MS_500); /* Standby time. */
 }
+void SensorPressaoAtm(){
+  ConfigSensorPressao();
+  float pressurePa = bmp.readPressure();
+  float pressureBar = pressurePa * 1e-5;
 
-void loop() {
     Serial.print(F("Temperature = "));
     Serial.print(bmp.readTemperature());
     Serial.println(" *C");
 
     Serial.print(F("Pressure = "));
     Serial.print(bmp.readPressure());
-   float pressurePa = bmp.readPressure();
-   float pressureBar = pressurePa * 1e-5;
-
+  
     Serial.print("Pressure = ");
     Serial.print(pressureBar, 6);  // 6 decimal places
     Serial.println(" atm");
@@ -57,4 +96,9 @@ void loop() {
 
     Serial.println();
     delay(2000);
+}
+void loop() {
+  SensorLuminosidade();
+  SensorUv();
+  SensorPressaoAtm();
 }
