@@ -3,38 +3,35 @@
 #include <SPI.h>
 #include <Adafruit_BMP280.h>
 
-const int pinoDO = 4;     // trocado
-const int pinoLED = 13;   // ajuste conforme seu circuito
+// const int pinoDO = 4;     // trocado
 
 #define BMP_SCK  (13)
 #define BMP_MISO (12)
 #define BMP_MOSI (11)
 #define BMP_CS   (10)
-
+// const int pinoDO = 34;     // saída digital do sensor
+const int pinoLED = 13;   // LED
+const int pinoAO = 34;    // pino analógico (ADC)
 Adafruit_BMP280 bmp; // I2C
 //Adafruit_BMP280 bmp(BMP_CS); // hardware SPI
 //Adafruit_BMP280 bmp(BMP_CS, BMP_MOSI, BMP_MISO,  BMP_SCK);
 
 void setup() {
-  pinMode(pinoDO, INPUT);
+  // pinMode(pinoDO, INPUT);
   pinMode(pinoLED, OUTPUT);
   Serial.begin(9600); // ESP32 usa melhor 115200
+  analogReadResolution(12); // ESP32: 0–4095
 }
-void SensorLuminosidade(){
+void SensorLuminosidade() {
+  // int estado = digitalRead(pinoDO);
+    int valorLuz = analogRead(pinoAO);
 
-int estado = digitalRead(pinoDO);
-
-  if (estado == LOW) { // geralmente invertido
-    digitalWrite(pinoLED, HIGH); // LED ON
-    Serial.println("Luz Detectada");
-  } else {
-    digitalWrite(pinoLED, LOW); // LED OFF
-    Serial.println("Escuro");
-  }
-
+  // Serial.println(estado);
+     Serial.println(valorLuz);
   delay(200);
-
 }
+
+
 void SensorUv() {
   float sensorVoltage; 
   float sensorValue;
