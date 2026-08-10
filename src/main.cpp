@@ -223,118 +223,135 @@ void enviarDadosFirebase() {
         return;
     }
 
-
     // =========================================================
-    // JSON PRINCIPAL
-    // =========================================================
-
-    FirebaseJson json;
-
-
-    // =========================================================
-    // INFORMAÇÕES DA ESTAÇÃO
+    // INFORMAÇÕES DA ESTAÇÃO (estado atual, não é histórico)
     // =========================================================
 
-    json.set("info/nome",dados_finais->nomeEstacao);
-    json.set("info/ativo",dados_finais->estacaoAtiva);
+    static bool infoEnviada = false;
 
+    if (!infoEnviada) {
+        FirebaseJson infoJson;
+        infoJson.set("nome", dados_finais->nomeEstacao);
+        infoJson.set("ativo", dados_finais->estacaoAtiva);
+
+        if (Firebase.RTDB.updateNode(&firebaseData, String(FIREBASE_PATH) + "/info", &infoJson)) {
+            Serial.println("Info da estação enviada com sucesso!");
+            infoEnviada = true;
+        } else {
+            Serial.print("Erro ao enviar info da estação: ");
+            Serial.println(firebaseData.errorReason());
+        }
+    }
+
+    bool ok = true;
 
     // =========================================================
     // LUMINOSIDADE
     // =========================================================
 
-    // json.set("sensores/luminosidade/valor", dados.luminosidade);
-    // json.set("sensores/luminosidade/unidade", "lux");
-    // json.set("sensores/luminosidade/ativo", dados.luminosidadeAtiva);
-    // json.set("sensores/luminosidade/timestamp", dados.timestamp);
+    // FirebaseJson luzJson;
+    // luzJson.set("timestamp/.sv", "timestamp");
+    // luzJson.set("valor", dados_finais->luminosidade);
+    // luzJson.set("unidade", "lux");
+    // luzJson.set("ativo", dados_finais->luminosidadeAtiva);
+    // if (!Firebase.RTDB.pushJSON(&firebaseData, String(FIREBASE_PATH) + "/sensores/luminosidade/leituras", &luzJson)) {
+    //     Serial.print("Erro luminosidade: ");
+    //     Serial.println(firebaseData.errorReason());
+    //     ok = false;
+    // }
 
 
     // =========================================================
     // UV
     // =========================================================
 
-    json.set("sensores/uv/valor",dados_finais->valor);
-    // json.set("sensores/uv/unidade", "indice");
-    // json.set("sensores/uv/ativo", dados.uvAtivo);
-    // json.set("sensores/uv/timestamp", dados.timestamp);
+    FirebaseJson uvJson;
+    uvJson.set("timestamp/.sv", "timestamp");
+    uvJson.set("valor", dados_finais->valor);
+    // uvJson.set("unidade", "indice");
+    // uvJson.set("ativo", dados_finais->uvAtivo);
+
+    if (!Firebase.RTDB.pushJSON(&firebaseData, String(FIREBASE_PATH) + "/sensores/uv/leituras", &uvJson)) {
+        Serial.print("Erro ao enviar UV: ");
+        Serial.println(firebaseData.errorReason());
+        ok = false;
+    }
 
 
     // =========================================================
     // PRESSÃO ATMOSFÉRICA
     // =========================================================
 
-    json.set("sensores/pressao/temperatura/valor",dados_finais->temperatura);
-    json.set("sensores/pressao/temperatura/unidade", "°C");
+    FirebaseJson pressaoJson;
+    pressaoJson.set("timestamp/.sv", "timestamp");
+    pressaoJson.set("temperatura/valor", dados_finais->temperatura);
+    pressaoJson.set("temperatura/unidade", "°C");
+    pressaoJson.set("pressurePa/valor", dados_finais->pressurePa);
+    pressaoJson.set("pressurePa/unidade", "Pa");
+    pressaoJson.set("pressureBar/valor", dados_finais->pressureBar);
+    pressaoJson.set("pressureBar/unidade", "bar");
+    pressaoJson.set("altitude/valor", dados_finais->altitude);
+    pressaoJson.set("altitude/unidade", "m");
 
-    json.set("sensores/pressao/pressurePa/valor",dados_finais->pressurePa);
-    json.set("sensores/pressao/pressurePa/unidade", "Pa");
-
-    json.set("sensores/pressao/pressureBar/valor",dados_finais->pressureBar);
-    json.set("sensores/pressao/pressureBar/unidade", "bar");
-
-    json.set("sensores/pressao/altitude/valor",dados_finais->altitude);
-    json.set("sensores/pressao/altitude/unidade", "m");
+    if (!Firebase.RTDB.pushJSON(&firebaseData, String(FIREBASE_PATH) + "/sensores/pressao/leituras", &pressaoJson)) {
+        Serial.print("Erro ao enviar pressão: ");
+        Serial.println(firebaseData.errorReason());
+        ok = false;
+    }
 
 
     // =========================================================
     // CHUVA
     // =========================================================
 
-    // json.set("sensores/chuva/valor", dados.volumeChuva);
-    // json.set("sensores/chuva/unidade", "mm");
-    // json.set("sensores/chuva/ativo", dados.chuvaAtiva);
-    // json.set("sensores/chuva/timestamp", dados.timestamp);
+    // FirebaseJson chuvaJson;
+    // chuvaJson.set("timestamp/.sv", "timestamp");
+    // chuvaJson.set("valor", dados_finais->volumeChuva);
+    // chuvaJson.set("unidade", "mm");
+    // chuvaJson.set("ativo", dados_finais->chuvaAtiva);
+    // if (!Firebase.RTDB.pushJSON(&firebaseData, String(FIREBASE_PATH) + "/sensores/chuva/leituras", &chuvaJson)) {
+    //     Serial.print("Erro chuva: ");
+    //     Serial.println(firebaseData.errorReason());
+    //     ok = false;
+    // }
 
 
     // =========================================================
-    // VENTO - VELOCIDADE
+    // VENTO - VELOCIDADE E DIREÇÃO
     // =========================================================
 
-    // json.set("sensores/vento/velocidade/valor",dados.velocidadeVento);
-
-    // json.set("sensores/vento/velocidade/unidade","km/h");
-
-    // json.set("sensores/vento/velocidade/ativo",dados.velocidadeVentoAtiva);
-
-    // json.set("sensores/vento/velocidade/timestamp",dados.timestamp);
-
-
-    // // =========================================================
-    // // VENTO - DIREÇÃO
-    // // =========================================================
-
-    // json.set("sensores/vento/direcao/valor",dados.direcaoVento);
-
-    // json.set("sensores/vento/direcao/unidade","graus");
-
-    // json.set("sensores/vento/direcao/ativo",dados.direcaoVentoAtiva);
-
-    // json.set("sensores/vento/direcao/timestamp",dados.timestamp);
+    // FirebaseJson ventoJson;
+    // ventoJson.set("timestamp/.sv", "timestamp");
+    // ventoJson.set("velocidade/valor", dados_finais->velocidadeVento);
+    // ventoJson.set("velocidade/unidade", "km/h");
+    // ventoJson.set("velocidade/ativo", dados_finais->velocidadeVentoAtiva);
+    // ventoJson.set("direcao/valor", dados_finais->direcaoVento);
+    // ventoJson.set("direcao/unidade", "graus");
+    // ventoJson.set("direcao/ativo", dados_finais->direcaoVentoAtiva);
+    // if (!Firebase.RTDB.pushJSON(&firebaseData, String(FIREBASE_PATH) + "/sensores/vento/leituras", &ventoJson)) {
+    //     Serial.print("Erro vento: ");
+    //     Serial.println(firebaseData.errorReason());
+    //     ok = false;
+    // }
 
 
     // =========================================================
     // GPS
     // =========================================================
 
-    json.set("sensores/gps/latitude",dados_finais->latitude);
+    FirebaseJson gpsJson;
+    gpsJson.set("timestamp/.sv", "timestamp");
+    gpsJson.set("latitude", dados_finais->latitude);
+    gpsJson.set("longitude", dados_finais->longitude);
 
-    json.set("sensores/gps/longitude",dados_finais->longitude);
-
-    // json.set("sensores/gps/timestamp",dados_finais->timestamp);
-
-
-    // =========================================================
-    // ENVIO
-    // =========================================================
-
-      String caminho = FIREBASE_PATH;
-    Serial.println("Enviando dados para Firebase...");
-
-    if (Firebase.RTDB.updateNode(&firebaseData, caminho, &json)) {
-        Serial.println("Dados enviados com sucesso!");
-    } else {
-        Serial.print("Erro ao enviar para Firebase: ");
+    if (!Firebase.RTDB.pushJSON(&firebaseData, String(FIREBASE_PATH) + "/sensores/gps/leituras", &gpsJson)) {
+        Serial.print("Erro ao enviar GPS: ");
         Serial.println(firebaseData.errorReason());
+        ok = false;
+    }
+
+    if (ok) {
+        Serial.println("Todos os dados enviados com sucesso!");
     }
 }
 // //////////////////////////////////////////
