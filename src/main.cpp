@@ -67,12 +67,12 @@ typedef struct {
 
     uint32_t timestamp;
 
-    uint16_t ano;
-    uint8_t mes;
-    uint8_t dia;
-    uint8_t hora;
-    uint8_t minuto;
-    uint8_t segundo;
+    uint16_t ano = 0;
+    uint8_t mes = 0;
+    uint8_t dia = 0;
+    uint8_t hora = 0;
+    uint8_t minuto = 0;
+    uint8_t segundo = 0;
 
     // SENSOR - LUMINOSIDADE
 
@@ -81,38 +81,38 @@ typedef struct {
 
     // SENSOR - UV
 
-    float valor;
+    float valor = 0;
 
 
     // SENSOR - PRESSÃO ATMOSFÉRICA
 
-    float temperatura;
-    float pressurePa;
-    float pressureBar;
-    float altitude;
+    float temperatura = 0;
+    float pressurePa = 0;
+    float pressureBar = 0;
+    float altitude = 0;
 
 
     // SENSOR - CHUVA
 
-    float volumeChuva;
+    float volumeChuva = 0.0;
     bool chuvaAtiva;
 
     // SENSOR - VENTO
 
-    float velocidadeVento;
+    float velocidadeVento = 0.0;
     bool velocidadeVentoAtiva;
 
-    float direcaoVento;
+    float direcaoVento = 0.0;
     bool direcaoVentoAtiva;
 
     // SENSOR - GPS
   
-    double latitude;
-    double longitude;
+    double latitude = 0;
+    double longitude = 0;
     bool gpsAtivo;
 
 } Data;
-Data dados_finais[TAM_BUFFER];
+Data dados_finais;
 
 
 // const int pinoDO = 34;     // saída digital do sensor
@@ -145,7 +145,7 @@ void SensorUv() {
   Serial.print("sensor voltage = ");
   Serial.print(sensorVoltage);
   Serial.println(" V");
-  dados_finais->valor = sensorVoltage;
+  dados_finais.valor = sensorVoltage;
   delay(1000);
 }
 void ConfigSensorPressao(){
@@ -231,8 +231,8 @@ void enviarDadosFirebase() {
 
     if (!infoEnviada) {
         FirebaseJson infoJson;
-        infoJson.set("nome", dados_finais->nomeEstacao);
-        infoJson.set("ativo", dados_finais->estacaoAtiva);
+        infoJson.set("nome", dados_finais.nomeEstacao);
+        infoJson.set("ativo", dados_finais.estacaoAtiva);
 
         if (Firebase.RTDB.updateNode(&firebaseData, String(FIREBASE_PATH) + "/info", &infoJson)) {
             Serial.println("Info da estação enviada com sucesso!");
@@ -267,7 +267,7 @@ void enviarDadosFirebase() {
 
     FirebaseJson uvJson;
     uvJson.set("timestamp/.sv", "timestamp");
-    uvJson.set("valor", dados_finais->valor);
+    uvJson.set("valor", dados_finais.valor);
     // uvJson.set("unidade", "indice");
     // uvJson.set("ativo", dados_finais->uvAtivo);
 
@@ -284,13 +284,13 @@ void enviarDadosFirebase() {
 
     FirebaseJson pressaoJson;
     pressaoJson.set("timestamp/.sv", "timestamp");
-    pressaoJson.set("temperatura/valor", dados_finais->temperatura);
+    pressaoJson.set("temperatura/valor", dados_finais.temperatura);
     pressaoJson.set("temperatura/unidade", "°C");
-    pressaoJson.set("pressurePa/valor", dados_finais->pressurePa);
+    pressaoJson.set("pressurePa/valor", dados_finais.pressurePa);
     pressaoJson.set("pressurePa/unidade", "Pa");
-    pressaoJson.set("pressureBar/valor", dados_finais->pressureBar);
+    pressaoJson.set("pressureBar/valor", dados_finais.pressureBar);
     pressaoJson.set("pressureBar/unidade", "bar");
-    pressaoJson.set("altitude/valor", dados_finais->altitude);
+    pressaoJson.set("altitude/valor", dados_finais.altitude);
     pressaoJson.set("altitude/unidade", "m");
 
     if (!Firebase.RTDB.pushJSON(&firebaseData, String(FIREBASE_PATH) + "/sensores/pressao/leituras", &pressaoJson)) {
@@ -341,8 +341,8 @@ void enviarDadosFirebase() {
 
     FirebaseJson gpsJson;
     gpsJson.set("timestamp/.sv", "timestamp");
-    gpsJson.set("latitude", dados_finais->latitude);
-    gpsJson.set("longitude", dados_finais->longitude);
+    gpsJson.set("latitude", dados_finais.latitude);
+    gpsJson.set("longitude", dados_finais.longitude);
 
     if (!Firebase.RTDB.pushJSON(&firebaseData, String(FIREBASE_PATH) + "/sensores/gps/leituras", &gpsJson)) {
         Serial.print("Erro ao enviar GPS: ");
@@ -385,20 +385,116 @@ void LerGps(){
     }
     // Latitude
     if (gps.location.isValid()) {
-        dados_finais->latitude = gps.location.lat();
+        dados_finais.latitude = gps.location.lat();
         Serial.print("Latitude: ");
-        Serial.println(dados_finais->latitude, 6);
+        Serial.println(dados_finais.latitude, 6);
 
-        dados_finais->longitude = gps.location.lng();
+        dados_finais.longitude = gps.location.lng();
         Serial.print("Longitude: ");
-        Serial.println(dados_finais->longitude, 6);
+        Serial.println(dados_finais.longitude, 6);
 
     } else {
-        dados_finais->latitude = 0.0;
-        dados_finais->longitude = 0.0;
+        dados_finais.latitude = 0.0;
+        dados_finais.longitude = 0.0;
     }
 
   }
+  // verificar essa funcao 
+void salvarDados() {
+
+    File file = LittleFS.open("/dados.bin", FILE_APPEND);
+
+    if (!file) {
+        Serial.println("Erro ao abrir /dados.bin para escrita");
+        return;
+    }
+
+    size_t bytesGravados = file.write((uint8_t*)&dados_finais,sizeof(Data));
+
+    file.flush();
+    file.close();
+
+    if (bytesGravados == sizeof(Data)) {
+        Serial.println("Dados salvos com sucesso!");
+    } else {
+        Serial.println("Erro ao salvar os dados!");
+    }
+}
+void lerDados() {
+
+    File file = LittleFS.open("/dados.bin", FILE_READ);
+
+    if (!file) {
+        Serial.println("ERRO: não foi possível abrir dados.bin");
+        return;
+    }
+
+    Serial.print("Tamanho do arquivo: ");
+    Serial.println(file.size());
+
+    Data dadosLidos;
+
+    while (file.available()) {
+
+        size_t bytesLidos = file.read(
+            (uint8_t*)&dadosLidos,
+            sizeof(Data)
+        );
+
+        if (bytesLidos != sizeof(Data)) {
+            Serial.println("ERRO: registro incompleto!");
+            break;
+        }
+
+        Serial.println("-------------------------");
+        Serial.println("REGISTRO ENCONTRADO");
+
+        Serial.print("Nome: ");
+        Serial.println(dadosLidos.nomeEstacao);
+
+        Serial.print("Firmware: ");
+        Serial.println(dadosLidos.firmware);
+
+        Serial.print("Temperatura: ");
+        Serial.println(dadosLidos.temperatura);
+
+        Serial.print("Pressao Pa: ");
+        Serial.println(dadosLidos.pressurePa);
+
+        Serial.print("Pressao Bar: ");
+        Serial.println(dadosLidos.pressureBar);
+
+        Serial.print("Altitude: ");
+        Serial.println(dadosLidos.altitude);
+
+        Serial.print("Luminosidade: ");
+        Serial.println(dadosLidos.luminosidade);
+
+        Serial.print("UV: ");
+        Serial.println(dadosLidos.valor);
+
+        Serial.print("Latitude: ");
+        Serial.println(dadosLidos.latitude, 6);
+
+        Serial.print("Longitude: ");
+        Serial.println(dadosLidos.longitude, 6);
+
+        Serial.print("Velocidade vento: ");
+        Serial.println(dadosLidos.velocidadeVento);
+
+        Serial.print("Direcao vento: ");
+        Serial.println(dadosLidos.direcaoVento);
+
+        Serial.print("Chuva: ");
+        Serial.println(dadosLidos.volumeChuva);
+
+        Serial.print("Timestamp: ");
+        Serial.println(dadosLidos.timestamp);
+    }
+
+    file.close();
+}
+
 
 void SensorVolumeChuva(){}
 void SensorVelociadadeVento(){}
@@ -417,12 +513,21 @@ void setup() {
         GPS_TX
     );
 
+    // Monta o sistema de arquivos LittleFS
+    if (!LittleFS.begin(true)) {
+        Serial.println("ERRO: falha ao montar LittleFS!");
+        return;
+    }
+
+    Serial.println("LittleFS montado com sucesso!");
+
   wifi();    // conexao wifi ok
   ConfigFirebase();
 }
 
 void loop() {
-
+  salvarDados();  // funcao ok salvando os dados falta testar por horas
+  lerDados(); // esta recuperando os dados corretamente
   // SensorVolumeChuva(); -> precisa desenvolver a funcao ainda
   // SensorVelociadadeVento(); -> precisa desenvolver a funcao ainda
   // SensorDirecaoVento(); -> precisa desenvolver a funcao ainda
@@ -430,9 +535,9 @@ void loop() {
   // SensorUv();  conexao ok
   // SensorPressaoAtm(); conexao ok
   // LerGps(); precisa testar na placa 
-  if (WiFi.status() != WL_CONNECTED) {
-    wifi();
-  }
-  enviarDadosFirebase(); // esta funcionando corretamente
-  delay(5000);
+  // if (WiFi.status() != WL_CONNECTED) {
+  //   wifi();
+  // }
+  // enviarDadosFirebase(); // esta funcionando corretamente
+  // delay(5000);
 }
