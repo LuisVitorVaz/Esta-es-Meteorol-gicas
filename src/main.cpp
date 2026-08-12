@@ -113,6 +113,8 @@ typedef struct {
 } Data;
 Data dados_finais; // dados lidos dos sensores
 
+bool dados_Enviados = false;
+
 Data dadosLidos;  // dados lidos do arquivo 
 
 #define DELAY_COLETA 60000  //1 minuto
@@ -232,9 +234,8 @@ void enviarDadosFirebase() {
     if (!infoEnviada) {
 
         FirebaseJson infoJson;
-
-        infoJson.set("nome", dadosLidos.nomeEstacao);
-        infoJson.set("ativo", dadosLidos.estacaoAtiva);
+        infoJson.set("nome", dados_finais.nomeEstacao);
+        infoJson.set("ativo", dados_finais.estacaoAtiva);
 
         if (Firebase.RTDB.updateNode(
                 &firebaseData,
@@ -245,112 +246,126 @@ void enviarDadosFirebase() {
             infoEnviada = true;
 
         } else {
-
             Serial.print("Erro ao enviar info da estação: ");
             Serial.println(firebaseData.errorReason());
         }
     }
 
-
     // =========================================================
-    // REGISTRO COMPLETO DA COLETA
-    // =========================================================
-
-    FirebaseJson registroJson;
-
-
-    // =========================================================
-    // DATA / HORA
+    // LÊ TODOS OS REGISTROS PENDENTES PARA MEMÓRIA
     // =========================================================
 
-    registroJson.set("dataHora/timestamp", dadosLidos.timestamp);
-    registroJson.set("dataHora/ano", dadosLidos.ano);
-    registroJson.set("dataHora/mes", dadosLidos.mes);
-    registroJson.set("dataHora/dia", dadosLidos.dia);
-    registroJson.set("dataHora/hora", dadosLidos.hora);
-    registroJson.set("dataHora/minuto", dadosLidos.minuto);
-    registroJson.set("dataHora/segundo", dadosLidos.segundo);
-
-
-    // =========================================================
-    // UV
-    // =========================================================
-
-    registroJson.set("uv/valor", dadosLidos.valor);
-
-
-    // =========================================================
-    // PRESSÃO ATMOSFÉRICA
-    // =========================================================
-
-    registroJson.set("pressao/temperatura/valor", dadosLidos.temperatura);
-    registroJson.set("pressao/temperatura/unidade", "°C");
-
-    registroJson.set("pressao/pressurePa/valor", dadosLidos.pressurePa);
-    registroJson.set("pressao/pressurePa/unidade", "Pa");
-
-    registroJson.set("pressao/pressureBar/valor", dadosLidos.pressureBar);
-    registroJson.set("pressao/pressureBar/unidade", "bar");
-
-    registroJson.set("pressao/altitude/valor", dadosLidos.altitude);
-    registroJson.set("pressao/altitude/unidade", "m");
-
-
-    // =========================================================
-    // GPS
-    // =========================================================
-
-    registroJson.set("gps/latitude", dadosLidos.latitude);
-    registroJson.set("gps/longitude", dadosLidos.longitude);
-
-
-    // =========================================================
-    // CHUVA
-    // =========================================================
-
-    registroJson.set("chuva/valor", dadosLidos.volumeChuva);
-    registroJson.set("chuva/unidade", "mm");
-    registroJson.set("chuva/ativo", dadosLidos.chuvaAtiva);
-
-
-    // =========================================================
-    // VENTO
-    // =========================================================
-
-    registroJson.set("vento/velocidade/valor", dadosLidos.velocidadeVento);
-    registroJson.set("vento/velocidade/unidade", "km/h");
-    registroJson.set("vento/velocidade/ativo", dadosLidos.velocidadeVentoAtiva);
-
-    registroJson.set("vento/direcao/valor", dadosLidos.direcaoVento);
-    registroJson.set("vento/direcao/unidade", "graus");
-    registroJson.set("vento/direcao/ativo", dadosLidos.direcaoVentoAtiva);
-
-
-    // =========================================================
-    // LUMINOSIDADE
-    // =========================================================
-
-    registroJson.set("luminosidade/valor", dadosLidos.luminosidade);
-    registroJson.set("luminosidade/unidade", "lux");
-    registroJson.set("luminosidade/ativo", dadosLidos.luminosidadeAtiva);
-
-
-    // =========================================================
-    // ENVIA O REGISTRO COMPLETO
-    // =========================================================
-
-    if (Firebase.RTDB.pushJSON(
-            &firebaseData,
-            String(FIREBASE_PATH) + "/leituras",
-            &registroJson)) {
-
-        Serial.println("Registro completo enviado com sucesso!");
-
-    } else {
-
-        Serial.print("Erro ao enviar registro: ");
-        Serial.println(firebaseData.errorReason());
+    File file = LittleFS.open("/dados.bin", FILE_READ);
+    if (!file) {
+        Serial.println("ERRO: não foi possível abrir dados.bin");
+        return;
     }
+
+    int totalRegistros = file.size() / sizeof(Data);
+
+    if (totalRegistros == 0) {
+        file.close();
+        Serial.println("Nenhum dado pendente para enviar.");
+        return;
+    }
+
+    Data* registros = new Data[totalRegistros];
+
+    for (int i = 0; i < totalRegistros; i++) {
+        file.read((uint8_t*)&registros[i], sizeof(Data));
+    }
+
+    file.close();
+
+    // =========================================================
+    // ENVIA UM POR UM, EM ORDEM, PARA NO PRIMEIRO ERRO
+    // =========================================================
+
+    int enviados = 0;
+
+    for (int i = 0; i < totalRegistros; i++) {
+
+        FirebaseJson registroJson;
+        Data &r = registros[i];
+
+        registroJson.set("dataHora/timestamp", r.timestamp);
+        registroJson.set("dataHora/ano", r.ano);
+        registroJson.set("dataHora/mes", r.mes);
+        registroJson.set("dataHora/dia", r.dia);
+        registroJson.set("dataHora/hora", r.hora);
+        registroJson.set("dataHora/minuto", r.minuto);
+        registroJson.set("dataHora/segundo", r.segundo);
+
+        registroJson.set("uv/valor", r.valor);
+
+        registroJson.set("pressao/temperatura/valor", r.temperatura);
+        registroJson.set("pressao/temperatura/unidade", "°C");
+        registroJson.set("pressao/pressurePa/valor", r.pressurePa);
+        registroJson.set("pressao/pressurePa/unidade", "Pa");
+        registroJson.set("pressao/pressureBar/valor", r.pressureBar);
+        registroJson.set("pressao/pressureBar/unidade", "bar");
+        registroJson.set("pressao/altitude/valor", r.altitude);
+        registroJson.set("pressao/altitude/unidade", "m");
+
+        registroJson.set("gps/latitude", r.latitude);
+        registroJson.set("gps/longitude", r.longitude);
+
+        registroJson.set("chuva/valor", r.volumeChuva);
+        registroJson.set("chuva/unidade", "mm");
+        registroJson.set("chuva/ativo", r.chuvaAtiva);
+
+        registroJson.set("vento/velocidade/valor", r.velocidadeVento);
+        registroJson.set("vento/velocidade/unidade", "km/h");
+        registroJson.set("vento/velocidade/ativo", r.velocidadeVentoAtiva);
+        registroJson.set("vento/direcao/valor", r.direcaoVento);
+        registroJson.set("vento/direcao/unidade", "graus");
+        registroJson.set("vento/direcao/ativo", r.direcaoVentoAtiva);
+
+        registroJson.set("luminosidade/valor", r.luminosidade);
+        registroJson.set("luminosidade/unidade", "lux");
+        registroJson.set("luminosidade/ativo", r.luminosidadeAtiva);
+
+        if (Firebase.RTDB.pushJSON(&firebaseData, String(FIREBASE_PATH) + "/leituras", &registroJson)) {
+
+            Serial.print("Registro enviado com sucesso! Timestamp: ");
+            Serial.println(r.timestamp);
+            enviados++;
+
+        } else {
+
+            Serial.print("Erro ao enviar registro (timestamp ");
+            Serial.print(r.timestamp);
+            Serial.print("): ");
+            Serial.println(firebaseData.errorReason());
+            break; // para aqui, o resto fica pendente
+        }
+    }
+
+    // =========================================================
+    // REGRAVA O ARQUIVO SÓ COM O QUE FALTA ENVIAR
+    // =========================================================
+
+    LittleFS.remove("/dados.bin");
+
+    int restantes = totalRegistros - enviados;
+
+    if (restantes > 0) {
+        File fileW = LittleFS.open("/dados.bin", FILE_WRITE);
+        if (fileW) {
+            for (int i = enviados; i < totalRegistros; i++) {
+                fileW.write((uint8_t*)&registros[i], sizeof(Data));
+            }
+            fileW.flush();
+            fileW.close();
+        }
+    }
+
+    Serial.print("Enviados: ");
+    Serial.print(enviados);
+    Serial.print(" | Pendentes: ");
+    Serial.println(restantes);
+
+    delete[] registros;
 }
 // //////////////////////////////////////////
 
@@ -536,6 +551,9 @@ void lerDados() {
     file.close();
 }
 void limparArquivo() {
+
+if(dados_Enviados == true)
+  {
   File file = LittleFS.open("/dados.bin", FILE_WRITE);  // Abre em modo de escrita, o que limpa o conteúdo
   if (!file) {
     Serial.println("Erro ao abrir o arquivo para limpeza");
@@ -543,6 +561,11 @@ void limparArquivo() {
   }
   file.close();  // Fecha o arquivo imediatamente para garantir que fique vazio
   Serial.println("Arquivo limpo após envio para o BD");
+
+  dados_Enviados=false;
+ }else{
+    Serial.print("Dados nao enviados");
+ }
 }
 void light_sleep() {
   esp_sleep_enable_timer_wakeup(DELAY_COLETA * 1000);  
@@ -604,25 +627,51 @@ void setup() {
 
     Serial.println("LittleFS montado com sucesso!");
 
-  wifi();    // conexao wifi ok
-  ConfigFirebase();
+
 }
 
 void loop() {
-  // SensorVolumeChuva(); -> precisa desenvolver a funcao ainda
-  // SensorVelociadadeVento(); -> precisa desenvolver a funcao ainda
-  // SensorDirecaoVento(); -> precisa desenvolver a funcao ainda
-  // SensorLuminosidade(); -> preciso da funcao que tem
-  // SensorUv();  conexao ok
-  // SensorPressaoAtm(); conexao ok
-  // LerGps(); precisa testar na placa 
-  initTime(); // pega a hora da internet
-  salvarDados();  // funcao ok salvando os dados falta testar por horas
-  if (WiFi.status() != WL_CONNECTED) {
-    wifi();
-  }
-  lerDados(); // esta recuperando os dados corretamente
-  enviarDadosFirebase(); // esta funcionando corretamente
-  limparArquivo();
-  delay(5000);
+
+    wifi();    // conexao wifi ok
+    delay(1000);
+    ConfigFirebase();
+    // 2. Obter hora
+    delay(1000);
+    initTime();
+
+    // 3. Fazer as medições
+    // SensorVolumeChuva();
+    // SensorVelociadadeVento();
+    // SensorDirecaoVento();
+    // SensorLuminosidade();
+    // SensorUv();
+    // SensorPressaoAtm();
+    // LerGps();
+
+    // 4. Salvar localmente
+    delay(1000);
+
+    salvarDados();
+    delay(1000);
+
+    // 5. Ler dados pendentes
+    lerDados();
+    delay(1000);
+
+    // 6. Enviar para Firebase
+    enviarDadosFirebase();
+    delay(1000);
+
+    // 7. Limpar somente depois de confirmar envio
+    limparArquivo();
+    delay(1000);
+
+    // 8. Encerrar/desconectar conexões
+    // aqui depende da biblioteca Firebase utilizada
+
+    // 9. Dormir
+    light_sleep();
+    delay(1000);
+
+    // Não precisa desse delay de 5 segundos
 }
