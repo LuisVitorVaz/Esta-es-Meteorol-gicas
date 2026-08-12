@@ -115,6 +115,10 @@ Data dados_finais; // dados lidos dos sensores
 
 bool dados_Enviados = false;
 
+Data* registros = nullptr;
+int totalRegistros = 0;
+int enviados = 0;
+
 Data dadosLidos;  // dados lidos do arquivo 
 
 #define DELAY_COLETA 60000  //1 minuto
@@ -217,7 +221,125 @@ void ConfigFirebase() {
     Firebase.begin(&config, &auth);
     Firebase.reconnectWiFi(true);
 }
+// AS FUNCOES EnviarRegistros() E RegistrosPendentes() E RegravacaoDados() 
+// SAO FUNCAO DA FUNCAO enviarDadosFirebase()
+void EnviarRegistros() {
 
+    enviados = 0;
+
+    for (int i = 0; i < totalRegistros; i++) {
+
+        FirebaseJson registroJson;
+        Data &registro = registros[i];
+
+        registroJson.set("dataHora/timestamp", registro.timestamp);
+        registroJson.set("dataHora/ano", registro.ano);
+        registroJson.set("dataHora/mes", registro.mes);
+        registroJson.set("dataHora/dia", registro.dia);
+        registroJson.set("dataHora/hora", registro.hora);
+        registroJson.set("dataHora/minuto", registro.minuto);
+        registroJson.set("dataHora/segundo", registro.segundo);
+
+        registroJson.set("uv/valor", registro.valor);
+
+        registroJson.set("pressao/temperatura/valor", registro.temperatura);
+        registroJson.set("pressao/temperatura/unidade", "°C");
+        registroJson.set("pressao/pressurePa/valor", registro.pressurePa);
+        registroJson.set("pressao/pressurePa/unidade", "Pa");
+        registroJson.set("pressao/pressureBar/valor", registro.pressureBar);
+        registroJson.set("pressao/pressureBar/unidade", "bar");
+        registroJson.set("pressao/altitude/valor", registro.altitude);
+        registroJson.set("pressao/altitude/unidade", "m");
+
+        registroJson.set("gps/latitude", registro.latitude);
+        registroJson.set("gps/longitude", registro.longitude);
+
+        registroJson.set("chuva/valor", registro.volumeChuva);
+        registroJson.set("chuva/unidade", "mm");
+        registroJson.set("chuva/ativo", registro.chuvaAtiva);
+
+        registroJson.set("vento/velocidade/valor", registro.velocidadeVento);
+        registroJson.set("vento/velocidade/unidade", "km/h");
+        registroJson.set("vento/velocidade/ativo", registro.velocidadeVentoAtiva);
+        registroJson.set("vento/direcao/valor", registro.direcaoVento);
+        registroJson.set("vento/direcao/unidade", "graus");
+        registroJson.set("vento/direcao/ativo", registro.direcaoVentoAtiva);
+
+        registroJson.set("luminosidade/valor", registro.luminosidade);
+        registroJson.set("luminosidade/unidade", "lux");
+        registroJson.set("luminosidade/ativo", registro.luminosidadeAtiva);
+
+        if (Firebase.RTDB.pushJSON(&firebaseData, String(FIREBASE_PATH) + "/leituras", &registroJson)) {
+
+            Serial.print("Registro enviado com sucesso! Timestamp: ");
+            Serial.println(registro.timestamp);
+            enviados++;
+
+        } else {
+
+            Serial.print("Erro ao enviar registro (timestamp ");
+            Serial.print(registro.timestamp);
+            Serial.print("): ");
+            Serial.println(firebaseData.errorReason());
+            break;
+        }
+    }
+}
+
+void RegistrosPendentes() {
+
+    File file = LittleFS.open("/dados.bin", FILE_READ);
+
+    if (!file) {
+        Serial.println("ERRO: não foi possível abrir dados.bin");
+        return;
+    }
+
+    totalRegistros = file.size() / sizeof(Data);
+
+    if (totalRegistros == 0) {
+        file.close();
+        Serial.println("Nenhum dado pendente para enviar.");
+        return;
+    }
+
+    registros = new Data[totalRegistros];
+
+    for (int i = 0; i < totalRegistros; i++) {
+        file.read((uint8_t*)&registros[i], sizeof(Data));
+    }
+
+    file.close();
+}
+void RegravacaoDados() {
+
+    LittleFS.remove("/dados.bin");
+
+    int restantes = totalRegistros - enviados;
+
+    if (restantes > 0) {
+
+        File fileW = LittleFS.open("/dados.bin", FILE_WRITE);
+
+        if (fileW) {
+
+            for (int i = enviados; i < totalRegistros; i++) {
+                fileW.write((uint8_t*)&registros[i], sizeof(Data));
+            }
+
+            fileW.flush();
+            fileW.close();
+        }
+    }
+
+    Serial.print("Enviados: ");
+    Serial.print(enviados);
+    Serial.print(" | Pendentes: ");
+    Serial.println(restantes);
+
+    delete[] registros;
+    registros = nullptr;
+}
 void enviarDadosFirebase() {
 
     if (!Firebase.ready()) {
@@ -227,9 +349,7 @@ void enviarDadosFirebase() {
 
     static bool infoEnviada = false;
 
-    // =========================================================
     // INFO DA ESTAÇÃO
-    // =========================================================
 
     if (!infoEnviada) {
 
@@ -251,121 +371,17 @@ void enviarDadosFirebase() {
         }
     }
 
-    // =========================================================
     // LÊ TODOS OS REGISTROS PENDENTES PARA MEMÓRIA
-    // =========================================================
 
-    File file = LittleFS.open("/dados.bin", FILE_READ);
-    if (!file) {
-        Serial.println("ERRO: não foi possível abrir dados.bin");
-        return;
-    }
+        RegistrosPendentes();
 
-    int totalRegistros = file.size() / sizeof(Data);
-
-    if (totalRegistros == 0) {
-        file.close();
-        Serial.println("Nenhum dado pendente para enviar.");
-        return;
-    }
-
-    Data* registros = new Data[totalRegistros];
-
-    for (int i = 0; i < totalRegistros; i++) {
-        file.read((uint8_t*)&registros[i], sizeof(Data));
-    }
-
-    file.close();
-
-    // =========================================================
     // ENVIA UM POR UM, EM ORDEM, PARA NO PRIMEIRO ERRO
-    // =========================================================
 
-    int enviados = 0;
+        EnviarRegistros();
 
-    for (int i = 0; i < totalRegistros; i++) {
-
-        FirebaseJson registroJson;
-        Data &r = registros[i];
-
-        registroJson.set("dataHora/timestamp", r.timestamp);
-        registroJson.set("dataHora/ano", r.ano);
-        registroJson.set("dataHora/mes", r.mes);
-        registroJson.set("dataHora/dia", r.dia);
-        registroJson.set("dataHora/hora", r.hora);
-        registroJson.set("dataHora/minuto", r.minuto);
-        registroJson.set("dataHora/segundo", r.segundo);
-
-        registroJson.set("uv/valor", r.valor);
-
-        registroJson.set("pressao/temperatura/valor", r.temperatura);
-        registroJson.set("pressao/temperatura/unidade", "°C");
-        registroJson.set("pressao/pressurePa/valor", r.pressurePa);
-        registroJson.set("pressao/pressurePa/unidade", "Pa");
-        registroJson.set("pressao/pressureBar/valor", r.pressureBar);
-        registroJson.set("pressao/pressureBar/unidade", "bar");
-        registroJson.set("pressao/altitude/valor", r.altitude);
-        registroJson.set("pressao/altitude/unidade", "m");
-
-        registroJson.set("gps/latitude", r.latitude);
-        registroJson.set("gps/longitude", r.longitude);
-
-        registroJson.set("chuva/valor", r.volumeChuva);
-        registroJson.set("chuva/unidade", "mm");
-        registroJson.set("chuva/ativo", r.chuvaAtiva);
-
-        registroJson.set("vento/velocidade/valor", r.velocidadeVento);
-        registroJson.set("vento/velocidade/unidade", "km/h");
-        registroJson.set("vento/velocidade/ativo", r.velocidadeVentoAtiva);
-        registroJson.set("vento/direcao/valor", r.direcaoVento);
-        registroJson.set("vento/direcao/unidade", "graus");
-        registroJson.set("vento/direcao/ativo", r.direcaoVentoAtiva);
-
-        registroJson.set("luminosidade/valor", r.luminosidade);
-        registroJson.set("luminosidade/unidade", "lux");
-        registroJson.set("luminosidade/ativo", r.luminosidadeAtiva);
-
-        if (Firebase.RTDB.pushJSON(&firebaseData, String(FIREBASE_PATH) + "/leituras", &registroJson)) {
-
-            Serial.print("Registro enviado com sucesso! Timestamp: ");
-            Serial.println(r.timestamp);
-            enviados++;
-
-        } else {
-
-            Serial.print("Erro ao enviar registro (timestamp ");
-            Serial.print(r.timestamp);
-            Serial.print("): ");
-            Serial.println(firebaseData.errorReason());
-            break; // para aqui, o resto fica pendente
-        }
-    }
-
-    // =========================================================
     // REGRAVA O ARQUIVO SÓ COM O QUE FALTA ENVIAR
-    // =========================================================
 
-    LittleFS.remove("/dados.bin");
-
-    int restantes = totalRegistros - enviados;
-
-    if (restantes > 0) {
-        File fileW = LittleFS.open("/dados.bin", FILE_WRITE);
-        if (fileW) {
-            for (int i = enviados; i < totalRegistros; i++) {
-                fileW.write((uint8_t*)&registros[i], sizeof(Data));
-            }
-            fileW.flush();
-            fileW.close();
-        }
-    }
-
-    Serial.print("Enviados: ");
-    Serial.print(enviados);
-    Serial.print(" | Pendentes: ");
-    Serial.println(restantes);
-
-    delete[] registros;
+         RegravacaoDados();
 }
 // //////////////////////////////////////////
 
