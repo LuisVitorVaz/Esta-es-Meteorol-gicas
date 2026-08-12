@@ -54,7 +54,6 @@ bool firebase_flag = true;
 #define BMP_CS   (10)
 
 // a pensar 
-#define TAM_BUFFER 5
 typedef struct {
 
     // INFO DA ESTAÇÃO
@@ -112,8 +111,13 @@ typedef struct {
     bool gpsAtivo;
 
 } Data;
-Data dados_finais;
+Data dados_finais; // dados lidos dos sensores
 
+Data dadosLidos;  // dados lidos do arquivo 
+
+#define DELAY_COLETA 60000  //1 minuto
+//#define DELAY_COLETA 300000  //5 minutos
+//#define DELAY_COLETA 600000  //10 minutos
 
 // const int pinoDO = 34;     // saída digital do sensor
 const int pinoLED = 13;   // LED
@@ -214,25 +218,17 @@ void ConfigFirebase() {
 
 void enviarDadosFirebase() {
 
-    // =========================================================
-    // VERIFICA FIREBASE
-    // =========================================================
-
     if (!Firebase.ready()) {
         Serial.println("Firebase não está pronto.");
         return;
     }
 
-    // =========================================================
-    // INFORMAÇÕES DA ESTAÇÃO (estado atual, não é histórico)
-    // =========================================================
-
     static bool infoEnviada = false;
 
     if (!infoEnviada) {
         FirebaseJson infoJson;
-        infoJson.set("nome", dados_finais.nomeEstacao);
-        infoJson.set("ativo", dados_finais.estacaoAtiva);
+        infoJson.set("nome", dadosLidos.nomeEstacao);
+        infoJson.set("ativo", dadosLidos.estacaoAtiva);
 
         if (Firebase.RTDB.updateNode(&firebaseData, String(FIREBASE_PATH) + "/info", &infoJson)) {
             Serial.println("Info da estação enviada com sucesso!");
@@ -251,9 +247,9 @@ void enviarDadosFirebase() {
 
     // FirebaseJson luzJson;
     // luzJson.set("timestamp/.sv", "timestamp");
-    // luzJson.set("valor", dados_finais->luminosidade);
+    // luzJson.set("valor", dadosLidos.luminosidade);
     // luzJson.set("unidade", "lux");
-    // luzJson.set("ativo", dados_finais->luminosidadeAtiva);
+    // luzJson.set("ativo", dadosLidos.luminosidadeAtiva);
     // if (!Firebase.RTDB.pushJSON(&firebaseData, String(FIREBASE_PATH) + "/sensores/luminosidade/leituras", &luzJson)) {
     //     Serial.print("Erro luminosidade: ");
     //     Serial.println(firebaseData.errorReason());
@@ -267,7 +263,7 @@ void enviarDadosFirebase() {
 
     FirebaseJson uvJson;
     uvJson.set("timestamp/.sv", "timestamp");
-    uvJson.set("valor", dados_finais.valor);
+    uvJson.set("valor", dadosLidos.valor);
     // uvJson.set("unidade", "indice");
     // uvJson.set("ativo", dados_finais->uvAtivo);
 
@@ -284,13 +280,13 @@ void enviarDadosFirebase() {
 
     FirebaseJson pressaoJson;
     pressaoJson.set("timestamp/.sv", "timestamp");
-    pressaoJson.set("temperatura/valor", dados_finais.temperatura);
+    pressaoJson.set("temperatura/valor", dadosLidos.temperatura);
     pressaoJson.set("temperatura/unidade", "°C");
-    pressaoJson.set("pressurePa/valor", dados_finais.pressurePa);
+    pressaoJson.set("pressurePa/valor", dadosLidos.pressurePa);
     pressaoJson.set("pressurePa/unidade", "Pa");
-    pressaoJson.set("pressureBar/valor", dados_finais.pressureBar);
+    pressaoJson.set("pressureBar/valor", dadosLidos.pressureBar);
     pressaoJson.set("pressureBar/unidade", "bar");
-    pressaoJson.set("altitude/valor", dados_finais.altitude);
+    pressaoJson.set("altitude/valor", dadosLidos.altitude);
     pressaoJson.set("altitude/unidade", "m");
 
     if (!Firebase.RTDB.pushJSON(&firebaseData, String(FIREBASE_PATH) + "/sensores/pressao/leituras", &pressaoJson)) {
@@ -306,9 +302,9 @@ void enviarDadosFirebase() {
 
     // FirebaseJson chuvaJson;
     // chuvaJson.set("timestamp/.sv", "timestamp");
-    // chuvaJson.set("valor", dados_finais->volumeChuva);
+    // chuvaJson.set("valor", dadosLidos.volumeChuva);
     // chuvaJson.set("unidade", "mm");
-    // chuvaJson.set("ativo", dados_finais->chuvaAtiva);
+    // chuvaJson.set("ativo", dadosLidos.chuvaAtiva);
     // if (!Firebase.RTDB.pushJSON(&firebaseData, String(FIREBASE_PATH) + "/sensores/chuva/leituras", &chuvaJson)) {
     //     Serial.print("Erro chuva: ");
     //     Serial.println(firebaseData.errorReason());
@@ -322,12 +318,12 @@ void enviarDadosFirebase() {
 
     // FirebaseJson ventoJson;
     // ventoJson.set("timestamp/.sv", "timestamp");
-    // ventoJson.set("velocidade/valor", dados_finais->velocidadeVento);
+    // ventoJson.set("velocidade/valor", dadosLidos.velocidadeVento);
     // ventoJson.set("velocidade/unidade", "km/h");
-    // ventoJson.set("velocidade/ativo", dados_finais->velocidadeVentoAtiva);
-    // ventoJson.set("direcao/valor", dados_finais->direcaoVento);
+    // ventoJson.set("velocidade/ativo", dadosLidos.velocidadeVentoAtiva);
+    // ventoJson.set("direcao/valor", dadosLidos.direcaoVento);
     // ventoJson.set("direcao/unidade", "graus");
-    // ventoJson.set("direcao/ativo", dados_finais->direcaoVentoAtiva);
+    // ventoJson.set("direcao/ativo", dadosLidos.direcaoVentoAtiva);
     // if (!Firebase.RTDB.pushJSON(&firebaseData, String(FIREBASE_PATH) + "/sensores/vento/leituras", &ventoJson)) {
     //     Serial.print("Erro vento: ");
     //     Serial.println(firebaseData.errorReason());
@@ -341,8 +337,8 @@ void enviarDadosFirebase() {
 
     FirebaseJson gpsJson;
     gpsJson.set("timestamp/.sv", "timestamp");
-    gpsJson.set("latitude", dados_finais.latitude);
-    gpsJson.set("longitude", dados_finais.longitude);
+    gpsJson.set("latitude", dadosLidos.latitude);
+    gpsJson.set("longitude", dadosLidos.longitude);
 
     if (!Firebase.RTDB.pushJSON(&firebaseData, String(FIREBASE_PATH) + "/sensores/gps/leituras", &gpsJson)) {
         Serial.print("Erro ao enviar GPS: ");
@@ -411,6 +407,7 @@ void salvarDados() {
 
     size_t bytesGravados = file.write((uint8_t*)&dados_finais,sizeof(Data));
 
+
     file.flush();
     file.close();
 
@@ -419,6 +416,28 @@ void salvarDados() {
     } else {
         Serial.println("Erro ao salvar os dados!");
     }
+
+        // teste
+        Serial.println("===== DADOS ANTES DE SALVAR =====");
+
+        Serial.print("Timestamp: ");
+        Serial.println(dados_finais.timestamp);
+
+        Serial.print("Data: ");
+        Serial.print(dados_finais.dia);
+        Serial.print("/");
+        Serial.print(dados_finais.mes);
+        Serial.print("/");
+        Serial.println(dados_finais.ano);
+
+        Serial.print("Hora: ");
+        Serial.print(dados_finais.hora);
+        Serial.print(":");
+        Serial.print(dados_finais.minuto);
+        Serial.print(":");
+        Serial.println(dados_finais.segundo);
+
+        Serial.println("=================================");
 }
 void lerDados() {
 
@@ -431,8 +450,6 @@ void lerDados() {
 
     Serial.print("Tamanho do arquivo: ");
     Serial.println(file.size());
-
-    Data dadosLidos;
 
     while (file.available()) {
 
@@ -490,12 +507,81 @@ void lerDados() {
 
         Serial.print("Timestamp: ");
         Serial.println(dadosLidos.timestamp);
+
+
+         Serial.println("===== DADOS APOS SALVAR =====");
+
+        Serial.print("Timestamp: ");
+        Serial.println(dados_finais.timestamp);
+
+        Serial.print("Data: ");
+        Serial.print(dados_finais.dia);
+        Serial.print("/");
+        Serial.print(dados_finais.mes);
+        Serial.print("/");
+        Serial.println(dados_finais.ano);
+
+        Serial.print("Hora: ");
+        Serial.print(dados_finais.hora);
+        Serial.print(":");
+        Serial.print(dados_finais.minuto);
+        Serial.print(":");
+        Serial.println(dados_finais.segundo);
+
+        Serial.println("=================================");
     }
 
     file.close();
 }
+void limparArquivo() {
+  File file = LittleFS.open("/dados.bin", FILE_WRITE);  // Abre em modo de escrita, o que limpa o conteúdo
+  if (!file) {
+    Serial.println("Erro ao abrir o arquivo para limpeza");
+    return;
+  }
+  file.close();  // Fecha o arquivo imediatamente para garantir que fique vazio
+  Serial.println("Arquivo limpo após envio para o BD");
+}
+void light_sleep() {
+  esp_sleep_enable_timer_wakeup(DELAY_COLETA * 1000);  
+  esp_light_sleep_start();
+  delay(500);  
+  Serial.println("ESP32 acordou do Light Sleep!");
+}
+//  funcao que pega a hora na internet
+void initTime() {
 
+    Serial.println("InitTime!");
 
+    configTime(-3 * 3600, 0, "pool.ntp.org");
+
+    struct tm timeinfo;
+    int tentativas = 0;
+
+    while (!getLocalTime(&timeinfo) && tentativas < 10) {
+        Serial.println("Aguardando sincronização NTP...");
+        delay(1000);
+        tentativas++;
+    }
+
+    if (tentativas >= 10) {
+        Serial.println("Falha ao obter tempo após 10 tentativas");
+    }
+
+    // Salva na struct global dados_finais
+    dados_finais.ano     = timeinfo.tm_year + 1900;
+    dados_finais.mes     = timeinfo.tm_mon + 1;
+    dados_finais.dia     = timeinfo.tm_mday;
+    dados_finais.hora    = timeinfo.tm_hour;
+    dados_finais.minuto  = timeinfo.tm_min;
+    dados_finais.segundo = timeinfo.tm_sec;
+
+    // Timestamp Unix
+    dados_finais.timestamp = mktime(&timeinfo);
+
+    Serial.println(&timeinfo, "Horário sincronizado: %d/%m/%Y %H:%M:%S");
+
+}
 void SensorVolumeChuva(){}
 void SensorVelociadadeVento(){}
 void SensorDirecaoVento(){}
@@ -503,15 +589,10 @@ void SensorDirecaoVento(){}
 void setup() {
   // pinMode(pinoDO, INPUT);
   pinMode(pinoLED, OUTPUT);
-  Serial.begin(9600); // ESP32 usa melhor 115200
+  Serial.begin(9600); 
   analogReadResolution(12); // ESP32: 0–4095
 
-  SerialGPS.begin(
-        GPS_BAUD,
-        SERIAL_8N1,
-        GPS_RX,
-        GPS_TX
-    );
+  SerialGPS.begin(GPS_BAUD,SERIAL_8N1,GPS_RX,GPS_TX);
 
     // Monta o sistema de arquivos LittleFS
     if (!LittleFS.begin(true)) {
@@ -526,8 +607,6 @@ void setup() {
 }
 
 void loop() {
-  salvarDados();  // funcao ok salvando os dados falta testar por horas
-  lerDados(); // esta recuperando os dados corretamente
   // SensorVolumeChuva(); -> precisa desenvolver a funcao ainda
   // SensorVelociadadeVento(); -> precisa desenvolver a funcao ainda
   // SensorDirecaoVento(); -> precisa desenvolver a funcao ainda
@@ -535,9 +614,13 @@ void loop() {
   // SensorUv();  conexao ok
   // SensorPressaoAtm(); conexao ok
   // LerGps(); precisa testar na placa 
-  // if (WiFi.status() != WL_CONNECTED) {
-  //   wifi();
-  // }
-  // enviarDadosFirebase(); // esta funcionando corretamente
-  // delay(5000);
+  initTime(); // pega a hora da internet
+  salvarDados();  // funcao ok salvando os dados falta testar por horas
+  if (WiFi.status() != WL_CONNECTED) {
+    wifi();
+  }
+  lerDados(); // esta recuperando os dados corretamente
+  enviarDadosFirebase(); // esta funcionando corretamente
+  limparArquivo();
+  delay(5000);
 }
