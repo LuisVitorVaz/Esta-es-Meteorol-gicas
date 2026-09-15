@@ -23,15 +23,14 @@ HardwareSerial SerialGPS(2);
 #define GPS_RX 16
 #define GPS_TX 17
 #define GPS_BAUD 9600
+#define PINO_SENSOR_VENTO 25  // ajuste para o seu pino
 
+uint32_t pulsosVento = 0;
 
-// const char* ssid = "REDE20";  // Colocar o nome da rede Wi-Fi
-// const char* password = "20#UERGSNET99";     // Colocar a senha da rede Wi-Fi
+const char* ssid = "REDE20";  // Colocar o nome da rede Wi-Fi
+const char* password = "20#UERGSNET99";     // Colocar a senha da rede Wi-Fi
 
-
-const char* ssid = "Camuflado STG";  // Colocar o nome da rede Wi-Fi
-const char* password = "@veialoka#rumo60@";     // Colocar a senha da rede Wi-Fi
-
+;
 // const int pinoDO = 4;     // trocado
 
 
@@ -48,10 +47,10 @@ FirebaseConfig config;
 FirebaseAuth auth;
 bool firebase_flag = true;
 
-#define BMP_SCK  (13)
-#define BMP_MISO (12)
-#define BMP_MOSI (11)
-#define BMP_CS   (10)
+// #define BMP_SCK  (13)
+// #define BMP_MISO (12)
+// #define BMP_MOSI (11)
+// #define BMP_CS   (10)
 
 // a pensar 
 typedef struct {
@@ -132,6 +131,11 @@ Adafruit_BMP280 bmp; // I2C
 //Adafruit_BMP280 bmp(BMP_CS); // hardware SPI
 //Adafruit_BMP280 bmp(BMP_CS, BMP_MOSI, BMP_MISO,  BMP_SCK);
 
+const int PINO_SENSOR = 27;
+    // Cada virada da báscula = 15 mL
+const float ML_POR_PULSO = 15.0;
+// Debounce do reed switch
+const unsigned long DEBOUNCE_US = 300000; // 300 ms
 
 void SensorLuminosidade() {     // precisa ser revisada
   // int estado = digitalRead(pinoDO);
@@ -623,16 +627,201 @@ void initTime() {
     Serial.println(&timeinfo, "Horário sincronizado: %d/%m/%Y %H:%M:%S");
 
 }
-void SensorVolumeChuva(){}
-void SensorVelociadadeVento(){}
-void SensorDirecaoVento(){}
+
+
+
+// =====================================================
+// VARIÁVEIS DA INTERRUPÇÃO
+// =====================================================
+
+// IMPORTANTE: volatile porque são alteradas pela interrupção
+volatile uint32_t pulsosChuva = 0;
+volatile uint32_t ultimoPulsoUS = 0;
+
+
+// =====================================================
+// INTERRUPÇÃO DO SENSOR
+// =====================================================
+
+void IRAM_ATTR detectarPulsoChuva()
+{
+    uint32_t agora = micros();
+
+    // Debounce
+    if ((agora - ultimoPulsoUS) >= DEBOUNCE_US)
+    {
+        pulsosChuva++;
+        ultimoPulsoUS = agora;
+    }
+}
+
+
+// =====================================================
+// FUNÇÃO PRINCIPAL DO PLUVIÔMETRO
+// =====================================================
+
+void SensorVolumeChuva()
+{
+    // -----------------------------------------------------
+    // Variáveis persistentes
+    // -----------------------------------------------------
+
+    static bool inicializado = false;
+
+    static uint32_t pulsosProcessados = 0;
+
+    static float volumeML = 0.0;
+    static float volumeLitros = 0.0;
+
+
+    // -----------------------------------------------------
+    // Inicialização
+    // -----------------------------------------------------
+
+    if (!inicializado)
+    {
+        pinMode(PINO_SENSOR, INPUT_PULLUP);
+
+        // Configura interrupção
+        attachInterrupt(
+            digitalPinToInterrupt(PINO_SENSOR),
+            detectarPulsoChuva,
+            FALLING
+        );
+
+        inicializado = true;
+
+        Serial.println();
+        Serial.println("================================");
+        Serial.println("PLUVIOMETRO INICIADO");
+        Serial.println("================================");
+        Serial.println("1 pulso = 15 mL");
+        Serial.println();
+    }
+
+
+    // -----------------------------------------------------
+    // Copia o contador da interrupção
+    // -----------------------------------------------------
+
+    uint32_t pulsosAtual;
+
+    noInterrupts();
+    pulsosAtual = pulsosChuva;
+    interrupts();
+
+
+    // -----------------------------------------------------
+    // Verifica se existe novo pulso
+    // -----------------------------------------------------
+
+    if (pulsosAtual > pulsosProcessados)
+    {
+        uint32_t novosPulsos =
+            pulsosAtual - pulsosProcessados;
+
+        // Atualiza quantos pulsos já foram processados
+        pulsosProcessados = pulsosAtual;
+
+
+        // -------------------------------------------------
+        // Calcula o volume
+        // -------------------------------------------------
+
+        volumeML += novosPulsos * ML_POR_PULSO;
+
+        volumeLitros = volumeML / 1000.0;
+
+
+        // -------------------------------------------------
+        // Mostra informações
+        // -------------------------------------------------
+
+        Serial.println("--------------------------------");
+
+        Serial.print("Novos pulsos: ");
+        Serial.println(novosPulsos);
+
+        Serial.print("Pulsos totais: ");
+        Serial.println(pulsosAtual);
+
+        Serial.print("Volume: ");
+        Serial.print(volumeML, 1);
+        Serial.println(" mL");
+
+        Serial.print("Volume: ");
+        Serial.print(volumeLitros, 3);
+        Serial.println(" L");
+
+        Serial.println("--------------------------------");
+    }
+}
+
+
+void calculaVelocidadeVento(float frequencia) {
+  float velocidade = -0.114f + (1.17f * frequencia) - (0.268f * frequencia * frequencia);
+
+  if (velocidade < 0.0f) {
+    velocidade = 0.0f;
+  }
+
+  Serial.print("Velocidade: ");
+  Serial.print(velocidade, 2);
+  Serial.println(" m/s");
+}
+void SensorVelociadadeVento() {
+
+  static bool estadoAnterior = LOW;
+  static uint32_t ultimoPulso = 0;
+
+  static float freqBuffer[10] = {0};
+  static uint8_t indice = 0;
+  static uint8_t amostras = 0;
+
+  bool estadoAtual = digitalRead(PINO_SENSOR_VENTO);
+
+  // Borda de subida
+  if (estadoAtual == HIGH && estadoAnterior == LOW) {
+
+    uint32_t agora = micros();
+
+    if (ultimoPulso != 0) {
+
+      float frequencia = 1000000.0f / (float)(agora - ultimoPulso);
+
+      // Armazena no buffer circular
+      freqBuffer[indice] = frequencia;
+      indice = (indice + 1) % 10;
+
+      if (amostras < 10)
+        amostras++;
+
+      // Calcula média
+      float soma = 0.0f;
+      for (uint8_t i = 0; i < amostras; i++) {
+        soma += freqBuffer[i];
+      }
+
+      float freqMedia = soma / amostras;
+
+      Serial.print("Freq: ");
+      Serial.print(freqMedia, 2);
+      Serial.println(" Hz");
+      calculaVelocidadeVento(freqMedia);
+
+    }
+    ultimoPulso = agora;
+  }
+
+  estadoAnterior = estadoAtual;
+}
 
 void setup() {
   // pinMode(pinoDO, INPUT);
   pinMode(pinoLED, OUTPUT);
   Serial.begin(9600); 
   analogReadResolution(12); // ESP32: 0–4095
-
+  pinMode(PINO_SENSOR_VENTO, INPUT);
   SerialGPS.begin(GPS_BAUD,SERIAL_8N1,GPS_RX,GPS_TX);
 
     // Monta o sistema de arquivos LittleFS
@@ -648,46 +837,36 @@ void setup() {
 
 void loop() {
 
-    wifi();    // conexao wifi ok
-    delay(1000);
-    ConfigFirebase();
-    // 2. Obter hora
-    delay(1000);
-    initTime();
+    // wifi();    // conexao wifi ok
+    // delay(1000);
+    // ConfigFirebase();
+    // delay(1000);
+    // initTime();
 
-    // 3. Fazer as medições
-    // SensorVolumeChuva();
-    // SensorVelociadadeVento();
+
+    SensorVolumeChuva();
+    // SensorVelociadadeVento();  // esta pronto
     // SensorDirecaoVento();
     // SensorLuminosidade();
-    // SensorUv();
-    // SensorPressaoAtm();
-    // LerGps();
+    // SensorUv();  // esta pronto
+    // SensorPressaoAtm();   // esta pronto
+    // LerGps(); //esta pronto
+    
+    // delay(1000);
 
-    // 4. Salvar localmente
-    delay(1000);
+    // salvarDados();
+    // delay(1000);
 
-    salvarDados();
-    delay(1000);
+    // lerDados(); // funcao para verificar se os dados estao sendo salvos corretamente
+    // delay(1000);
 
-    // 5. Ler dados pendentes
-    lerDados();
-    delay(1000);
+    // enviarDadosFirebase();
+    // delay(1000);
 
-    // 6. Enviar para Firebase
-    enviarDadosFirebase();
-    delay(1000);
+    // limparArquivo();
+    // delay(1000);
 
-    // 7. Limpar somente depois de confirmar envio
-    limparArquivo();
-    delay(1000);
+    // light_sleep();
+    // delay(1000);
 
-    // 8. Encerrar/desconectar conexões
-    // aqui depende da biblioteca Firebase utilizada
-
-    // 9. Dormir
-    light_sleep();
-    delay(1000);
-
-    // Não precisa desse delay de 5 segundos
 }
