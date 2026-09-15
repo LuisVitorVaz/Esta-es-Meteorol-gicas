@@ -13,6 +13,7 @@
 #include "esp_sleep.h"
 #include <time.h>
 #include <TinyGPSPlus.h>
+#include <ArduinoOTA.h>
 
 
 // config gps
@@ -27,10 +28,14 @@ HardwareSerial SerialGPS(2);
 
 uint32_t pulsosVento = 0;
 
-const char* ssid = "REDE20";  // Colocar o nome da rede Wi-Fi
-const char* password = "20#UERGSNET99";     // Colocar a senha da rede Wi-Fi
+// const char* ssid = "REDE20";  // Colocar o nome da rede Wi-Fi
+// const char* password = "20#UERGSNET99";     // Colocar a senha da rede Wi-Fi
 
-;
+const char* ssid = "Camuflado STG";  // Colocar o nome da rede Wi-Fi
+const char* password = "@veialoka#rumo60@";     // Colocar a senha da rede Wi-Fi
+
+
+
 // const int pinoDO = 4;     // trocado
 
 
@@ -135,7 +140,7 @@ const int PINO_SENSOR = 27;
     // Cada virada da báscula = 15 mL
 const float ML_POR_PULSO = 15.0;
 // Debounce do reed switch
-const unsigned long DEBOUNCE_US = 300000; // 300 ms
+const unsigned long DEBOUNCE_MS = 300; // 300 ms
 
 void SensorLuminosidade() {     // precisa ser revisada
   // int estado = digitalRead(pinoDO);
@@ -639,122 +644,100 @@ volatile uint32_t pulsosChuva = 0;
 volatile uint32_t ultimoPulsoUS = 0;
 
 
-// =====================================================
-// INTERRUPÇÃO DO SENSOR
-// =====================================================
-
-void IRAM_ATTR detectarPulsoChuva()
-{
-    uint32_t agora = micros();
-
-    // Debounce
-    if ((agora - ultimoPulsoUS) >= DEBOUNCE_US)
-    {
-        pulsosChuva++;
-        ultimoPulsoUS = agora;
-    }
-}
-
-
-// =====================================================
-// FUNÇÃO PRINCIPAL DO PLUVIÔMETRO
-// =====================================================
 
 void SensorVolumeChuva()
 {
-    // -----------------------------------------------------
-    // Variáveis persistentes
-    // -----------------------------------------------------
 
-    static bool inicializado = false;
+    static bool estadoAnterior = HIGH;
 
-    static uint32_t pulsosProcessados = 0;
+    static unsigned long ultimoAcionamento = 0;
+
+    static unsigned long pulsos = 0;
 
     static float volumeML = 0.0;
+
     static float volumeLitros = 0.0;
 
 
-    // -----------------------------------------------------
-    // Inicialização
-    // -----------------------------------------------------
+    // =====================================================
+    // CONFIGURA O PINO UMA ÚNICA VEZ
+    // =====================================================
+
+    static bool inicializado = false;
 
     if (!inicializado)
     {
         pinMode(PINO_SENSOR, INPUT_PULLUP);
 
-        // Configura interrupção
-        attachInterrupt(
-            digitalPinToInterrupt(PINO_SENSOR),
-            detectarPulsoChuva,
-            FALLING
-        );
+        estadoAnterior = digitalRead(PINO_SENSOR);
 
         inicializado = true;
 
-        Serial.println();
-        Serial.println("================================");
-        Serial.println("PLUVIOMETRO INICIADO");
-        Serial.println("================================");
+        Serial.println("Pluviometro iniciado");
         Serial.println("1 pulso = 15 mL");
-        Serial.println();
     }
 
 
-    // -----------------------------------------------------
-    // Copia o contador da interrupção
-    // -----------------------------------------------------
+    // =====================================================
+    // LEITURA DO SENSOR
+    // =====================================================
 
-    uint32_t pulsosAtual;
-
-    noInterrupts();
-    pulsosAtual = pulsosChuva;
-    interrupts();
+    bool estadoAtual = digitalRead(PINO_SENSOR);
 
 
-    // -----------------------------------------------------
-    // Verifica se existe novo pulso
-    // -----------------------------------------------------
+    // =====================================================
+    // DETECTA A VIRADA DA BASCULA
+    //
+    // Sensor normalmente HIGH
+    // Quando fecha o contato -> LOW
+    //
+    // Detectamos HIGH -> LOW
+    // =====================================================
 
-    if (pulsosAtual > pulsosProcessados)
+    if (estadoAnterior == HIGH && estadoAtual == LOW)
     {
-        uint32_t novosPulsos =
-            pulsosAtual - pulsosProcessados;
+        unsigned long agora = millis();
 
-        // Atualiza quantos pulsos já foram processados
-        pulsosProcessados = pulsosAtual;
+        // Debounce
+        if ((agora - ultimoAcionamento) >= DEBOUNCE_MS)
+        {
+            ultimoAcionamento = agora;
+
+            // Incrementa o contador
+            pulsos++;
+
+            // Adiciona 15 mL
+            volumeML += ML_POR_PULSO;
+
+            // Converte para litros
+            volumeLitros = volumeML / 1000.0;
 
 
-        // -------------------------------------------------
-        // Calcula o volume
-        // -------------------------------------------------
+            // =================================================
+            // MOSTRA NO MONITOR SERIAL
+            // =================================================
 
-        volumeML += novosPulsos * ML_POR_PULSO;
+            Serial.println("--------------------------------");
 
-        volumeLitros = volumeML / 1000.0;
+            Serial.print("Pulso: ");
+            Serial.println(pulsos);
 
+            Serial.print("Volume: ");
+            Serial.print(volumeML, 1);
+            Serial.println(" mL");
 
-        // -------------------------------------------------
-        // Mostra informações
-        // -------------------------------------------------
+            Serial.print("Volume: ");
+            Serial.print(volumeLitros, 3);
+            Serial.println(" L");
 
-        Serial.println("--------------------------------");
-
-        Serial.print("Novos pulsos: ");
-        Serial.println(novosPulsos);
-
-        Serial.print("Pulsos totais: ");
-        Serial.println(pulsosAtual);
-
-        Serial.print("Volume: ");
-        Serial.print(volumeML, 1);
-        Serial.println(" mL");
-
-        Serial.print("Volume: ");
-        Serial.print(volumeLitros, 3);
-        Serial.println(" L");
-
-        Serial.println("--------------------------------");
+            Serial.println("--------------------------------");
+        }
     }
+
+
+    // Atualiza estado anterior
+    estadoAnterior = estadoAtual;
+
 }
 
 
@@ -815,6 +798,45 @@ void SensorVelociadadeVento() {
 
   estadoAnterior = estadoAtual;
 }
+// void ota() {
+
+//     ArduinoOTA.setHostname("ESP32");
+
+//     ArduinoOTA.onStart([]() {
+//         Serial.println("Iniciando OTA...");
+//     });
+
+//     ArduinoOTA.onEnd([]() {
+//         Serial.println("\nOTA concluído!");
+//     });
+
+//     ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+//         Serial.printf("Progresso: %u%%\r", (progress * 100) / total);
+//     });
+
+//     ArduinoOTA.onError([](ota_error_t error) {
+//         Serial.printf("Erro OTA [%u]: ", error);
+
+//         if (error == OTA_AUTH_ERROR)
+//             Serial.println("Falha de autenticação");
+
+//         else if (error == OTA_BEGIN_ERROR)
+//             Serial.println("Falha ao iniciar");
+
+//         else if (error == OTA_CONNECT_ERROR)
+//             Serial.println("Falha de conexão");
+
+//         else if (error == OTA_RECEIVE_ERROR)
+//             Serial.println("Falha ao receber");
+
+//         else if (error == OTA_END_ERROR)
+//             Serial.println("Falha ao finalizar");
+//     });
+
+//     ArduinoOTA.begin();
+
+//     Serial.println("OTA habilitado.");
+// }
 
 void setup() {
   // pinMode(pinoDO, INPUT);
@@ -831,20 +853,28 @@ void setup() {
     }
 
     Serial.println("LittleFS montado com sucesso!");
+    // wifi();
 
+    // ota();
 
 }
 
 void loop() {
+       
+     
+    //     ArduinoOTA.handle();
+
+    // delay(1000);
 
     // wifi();    // conexao wifi ok
+    // ota();  // ← habilita OTA
     // delay(1000);
     // ConfigFirebase();
     // delay(1000);
     // initTime();
 
 
-    SensorVolumeChuva();
+    SensorVolumeChuva();  // esta pronta
     // SensorVelociadadeVento();  // esta pronto
     // SensorDirecaoVento();
     // SensorLuminosidade();
