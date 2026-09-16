@@ -799,45 +799,36 @@ void SensorVelociadadeVento() {
 
   estadoAnterior = estadoAtual;
 }
-// void ota() {
+void ota() {
+    ArduinoOTA.setHostname("ESP32-EstacaoMeteo");
+    // ArduinoOTA.setPassword("suaSenhaAqui"); // recomendado
 
-//     ArduinoOTA.setHostname("ESP32");
+    ArduinoOTA.onStart([]() {
+        String type = (ArduinoOTA.getCommand() == U_FLASH) ? "sketch" : "filesystem";
+        Serial.println("Iniciando OTA: " + type);
+    });
 
-//     ArduinoOTA.onStart([]() {
-//         Serial.println("Iniciando OTA...");
-//     });
+    ArduinoOTA.onEnd([]() {
+        Serial.println("\nOTA concluído!");
+    });
 
-//     ArduinoOTA.onEnd([]() {
-//         Serial.println("\nOTA concluído!");
-//     });
+    ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+        Serial.printf("Progresso: %u%%\r", (progress * 100) / total);
+    });
 
-//     ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
-//         Serial.printf("Progresso: %u%%\r", (progress * 100) / total);
-//     });
+    ArduinoOTA.onError([](ota_error_t error) {
+        Serial.printf("Erro OTA [%u]: ", error);
+        if (error == OTA_AUTH_ERROR) Serial.println("Falha de autenticação");
+        else if (error == OTA_BEGIN_ERROR) Serial.println("Falha ao iniciar");
+        else if (error == OTA_CONNECT_ERROR) Serial.println("Falha de conexão");
+        else if (error == OTA_RECEIVE_ERROR) Serial.println("Falha ao receber");
+        else if (error == OTA_END_ERROR) Serial.println("Falha ao finalizar");
+    });
 
-//     ArduinoOTA.onError([](ota_error_t error) {
-//         Serial.printf("Erro OTA [%u]: ", error);
+    ArduinoOTA.begin();
+    Serial.println("OTA habilitado. IP: " + WiFi.localIP().toString());
+}
 
-//         if (error == OTA_AUTH_ERROR)
-//             Serial.println("Falha de autenticação");
-
-//         else if (error == OTA_BEGIN_ERROR)
-//             Serial.println("Falha ao iniciar");
-
-//         else if (error == OTA_CONNECT_ERROR)
-//             Serial.println("Falha de conexão");
-
-//         else if (error == OTA_RECEIVE_ERROR)
-//             Serial.println("Falha ao receber");
-
-//         else if (error == OTA_END_ERROR)
-//             Serial.println("Falha ao finalizar");
-//     });
-
-//     ArduinoOTA.begin();
-
-//     Serial.println("OTA habilitado.");
-// }
 
 void setup() {
   // pinMode(pinoDO, INPUT);
@@ -854,16 +845,17 @@ void setup() {
     }
 
     Serial.println("LittleFS montado com sucesso!");
-    // wifi();
-
-    // ota();
-
+    
+    wifi();   // conecta UMA vez, aqui no setup
+    if (WiFi.status() == WL_CONNECTED) {
+        ota();  // só inicializa OTA se o WiFi realmente conectou
+    }
 }
 
 void loop() {
        
      
-    //     ArduinoOTA.handle();
+        ArduinoOTA.handle();
 
     // delay(1000);
 
@@ -875,7 +867,7 @@ void loop() {
     // initTime();
 
 
-    SensorVolumeChuva();  // esta pronta
+    // SensorVolumeChuva();  // esta pronta
     // SensorVelociadadeVento();  // esta pronto
     // SensorDirecaoVento();
     // SensorLuminosidade();
