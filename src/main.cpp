@@ -642,22 +642,25 @@ void initTime() {
 // IMPORTANTE: volatile porque são alteradas pela interrupção
 volatile uint32_t pulsosChuva = 0;
 volatile uint32_t ultimoPulsoUS = 0;
+volatile unsigned long ultimoPulsoChuva = 0;
 
+// essa funcao serve para quando tiver varias coisas funcionando ao mesmo tempo nao perder medicoes 
+void IRAM_ATTR interrupcaoChuva()
+{
+    unsigned long agora = millis();
 
-
+    // Debounce
+    if ((agora - ultimoPulsoChuva) >= DEBOUNCE_MS)
+    {
+        pulsosChuva++;
+        ultimoPulsoChuva = agora;
+    }
+}
 void SensorVolumeChuva()
 {
-
-    static bool estadoAnterior = HIGH;
-
-    static unsigned long ultimoAcionamento = 0;
-
-    static unsigned long pulsos = 0;
-
+    static unsigned long pulsosProcessados = 0;
     static float volumeML = 0.0;
-
     static float volumeLitros = 0.0;
-
 
     // =====================================================
     // CONFIGURA O PINO UMA ÚNICA VEZ
@@ -669,77 +672,75 @@ void SensorVolumeChuva()
     {
         pinMode(PINO_SENSOR, INPUT_PULLUP);
 
-        estadoAnterior = digitalRead(PINO_SENSOR);
+        attachInterrupt(
+            digitalPinToInterrupt(PINO_SENSOR),
+            interrupcaoChuva,
+            FALLING
+        );
 
         inicializado = true;
 
         Serial.println("Pluviometro iniciado");
         Serial.println("1 pulso = 15 mL");
+        Serial.println("Interrupcao ativada");
     }
 
 
     // =====================================================
-    // LEITURA DO SENSOR
+    // COPIA O CONTADOR DA INTERRUPÇÃO
     // =====================================================
 
-    bool estadoAtual = digitalRead(PINO_SENSOR);
+    unsigned long pulsosAtuais;
+
+    noInterrupts();
+    pulsosAtuais = pulsosChuva;
+    interrupts();
 
 
     // =====================================================
-    // DETECTA A VIRADA DA BASCULA
-    //
-    // Sensor normalmente HIGH
-    // Quando fecha o contato -> LOW
-    //
-    // Detectamos HIGH -> LOW
+    // VERIFICA SE EXISTEM NOVOS PULSOS
     // =====================================================
 
-    if (estadoAnterior == HIGH && estadoAtual == LOW)
+    if (pulsosAtuais > pulsosProcessados)
     {
-        unsigned long agora = millis();
+        unsigned long novosPulsos =
+            pulsosAtuais - pulsosProcessados;
 
-        // Debounce
-        if ((agora - ultimoAcionamento) >= DEBOUNCE_MS)
-        {
-            ultimoAcionamento = agora;
-
-            // Incrementa o contador
-            pulsos++;
-
-            // Adiciona 15 mL
-            volumeML += ML_POR_PULSO;
-
-            // Converte para litros
-            volumeLitros = volumeML / 1000.0;
+        pulsosProcessados = pulsosAtuais;
 
 
-            // =================================================
-            // MOSTRA NO MONITOR SERIAL
-            // =================================================
+        // =================================================
+        // ADICIONA O VOLUME
+        // =================================================
 
-            Serial.println("--------------------------------");
+        volumeML += novosPulsos * ML_POR_PULSO;
 
-            Serial.print("Pulso: ");
-            Serial.println(pulsos);
+        volumeLitros = volumeML / 1000.0;
 
-            Serial.print("Volume: ");
-            Serial.print(volumeML, 1);
-            Serial.println(" mL");
 
-            Serial.print("Volume: ");
-            Serial.print(volumeLitros, 3);
-            Serial.println(" L");
+        // =================================================
+        // MOSTRA NO MONITOR SERIAL
+        // =================================================
 
-            Serial.println("--------------------------------");
-        }
+        Serial.println("--------------------------------");
+
+        Serial.print("Pulso: ");
+        Serial.println(pulsosAtuais);
+
+        Serial.print("Novos pulsos: ");
+        Serial.println(novosPulsos);
+
+        Serial.print("Volume: ");
+        Serial.print(volumeML, 1);
+        Serial.println(" mL");
+
+        Serial.print("Volume: ");
+        Serial.print(volumeLitros, 3);
+        Serial.println(" L");
+
+        Serial.println("--------------------------------");
     }
-
-
-    // Atualiza estado anterior
-    estadoAnterior = estadoAtual;
-
 }
-
 
 void calculaVelocidadeVento(float frequencia) {
   float velocidade = -0.114f + (1.17f * frequencia) - (0.268f * frequencia * frequencia);
