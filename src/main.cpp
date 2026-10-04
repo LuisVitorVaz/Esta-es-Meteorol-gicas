@@ -5,8 +5,8 @@
 #include <Firebase_ESP_Client.h>
 #include "addons/TokenHelper.h"
 #include "addons/RTDBHelper.h"
-
 #include "FS.h"
+#include "driver/pcnt.h"
 #include <LittleFS.h>  
 #include <WiFi.h>
 #include <HardwareSerial.h>
@@ -14,25 +14,34 @@
 #include <time.h>
 #include <TinyGPSPlus.h>
 #include <ArduinoOTA.h>
-
-
+#include <DHT.h>
 // config gps
 TinyGPSPlus gps;
 
 HardwareSerial SerialGPS(2);
 
+// #define DELAY_COLETA 60000  //1 minuto
+// #define DELAY_COLETA 300000  //5 minutos
+#define DELAY_COLETA 600000  //10 minutos
+
 #define GPS_RX 16
 #define GPS_TX 17
 #define GPS_BAUD 9600
 #define PINO_SENSOR_VENTO 25  // ajuste para o seu pino
+#define DHTPIN 2
+#define DHTTYPE DHT11   // Troque para DHT22 se necessário
+#define pino 10
+DHT dht(DHTPIN, DHTTYPE);
 
+float temperatura;
+float umidade;
 uint32_t pulsosVento = 0;
 
-// const char* ssid = "REDE20";  // Colocar o nome da rede Wi-Fi
-// const char* password = "20#UERGSNET99";     // Colocar a senha da rede Wi-Fi
+const char* ssid = "REDE20";  // Colocar o nome da rede Wi-Fi
+const char* password = "20#UERGSNET99";     // Colocar a senha da rede Wi-Fi
 
-const char* ssid = "Camuflado STG";  // Colocar o nome da rede Wi-Fi
-const char* password = "@veialoka#rumo60@";     // Colocar a senha da rede Wi-Fi
+// const char* ssid = "Camuflado STG";  // Colocar o nome da rede Wi-Fi
+// const char* password = "@veialoka#rumo60@";     // Colocar a senha da rede Wi-Fi
 
 
 
@@ -116,46 +125,67 @@ typedef struct {
 
 } Data;
 Data dados_finais; // dados lidos dos sensores
-
-bool dados_Enviados = false;
-
+Data dadosLidos;  // dados lidos do arquivo 
 Data* registros = nullptr;
+bool dados_Enviados = false;
 int totalRegistros = 0;
 int enviados = 0;
 
-Data dadosLidos;  // dados lidos do arquivo 
-
-#define DELAY_COLETA 60000  //1 minuto
-//#define DELAY_COLETA 300000  //5 minutos
-//#define DELAY_COLETA 600000  //10 minutos
-
 // const int pinoDO = 34;     // saída digital do sensor
-const int pinoLED = 13;   // LED
-const int pinoAO = 34;    // pino analógico (ADC)
+int pinoLED = 13;   // LED
+int pinoAO = 34;    // pino analógico (ADC)
 Adafruit_BMP280 bmp; // I2C
-//Adafruit_BMP280 bmp(BMP_CS); // hardware SPI
-//Adafruit_BMP280 bmp(BMP_CS, BMP_MOSI, BMP_MISO,  BMP_SCK);
-
-const int PINO_SENSOR = 27;
+int PINO_SENSOR = 27;
     // Cada virada da báscula = 15 mL
-const float ML_POR_PULSO = 15.0;
+float ML_POR_PULSO = 15.0;
 // Debounce do reed switch
-const unsigned long DEBOUNCE_MS = 300; // 300 ms
+unsigned long DEBOUNCE_MS = 300; // 300 ms
 
+static bool estadoAnterior = LOW;
+static uint32_t ultimoPulso = 0;
+static float freqBuffer[10] = {0};
+static uint8_t indice = 0;
+static uint8_t amostras = 0;
+static unsigned long pulsosProcessados = 0;
+static float volumeML = 0.0;
+static float volumeLitros = 0.0;
+static bool inicializado = false;
+
+    uint64_t soma = 0;
+    static float periodos[10];
+    static uint8_t contador = 0;
+
+
+float sensorVoltage; 
+float sensorValue;
+ 
+
+//   ENTRA AQUI A PARTE DOS SENSORES COM LEDS
 void SensorLuminosidade() {     // precisa ser revisada
-  // int estado = digitalRead(pinoDO);
-    int valorLuz = analogRead(pinoAO);
 
-  // Serial.println(estado);
-     Serial.println(valorLuz);
-  delay(200);
+    for (uint8_t i = 0; i < 10; i++)
+    {
+        uint32_t alto = pulseIn(pino, HIGH);
+        uint32_t baixo = pulseIn(pino, LOW);
+
+        periodos[i] = alto + baixo;
+    }
+    for (uint8_t i = 0; i < 10; i++)
+    {
+        soma += periodos[i];
+    
+    //    contador = 0;
+    }
+     float frequencia = 1000000.0 / (soma / 10.0);
+
+     Serial.print("frequencia do sinal");
+     Serial.print(frequencia);
+
 }
 
 
 void SensorUv() {
-  float sensorVoltage; 
-  float sensorValue;
- 
+
   sensorValue = analogRead(36);
   sensorVoltage = sensorValue/4095*3.3;
   Serial.print("sensor reading = ");
@@ -185,7 +215,6 @@ void ConfigSensorPressao(){
     while (1) delay(10);
   }
 
-  /* Default settings from datasheet. */
   bmp.setSampling(Adafruit_BMP280::MODE_NORMAL,     /* Operating Mode. */
                   Adafruit_BMP280::SAMPLING_X2,     /* Temp. oversampling */
                   Adafruit_BMP280::SAMPLING_X16,    /* Pressure oversampling */
@@ -193,11 +222,16 @@ void ConfigSensorPressao(){
                   Adafruit_BMP280::STANDBY_MS_500); /* Standby time. */
 }
 void SensorPressaoAtm(){
+
+  float pressurePa = 0;
+  float pressureBar = 0;
+
   ConfigSensorPressao();
-  float temperatura = bmp.readTemperature();
-  float pressurePa = bmp.readPressure();
-  float pressureBar = pressurePa * 1e-5;
-  float altitude = bmp.readAltitude(1011.9);
+
+  dados_finais.temperatura = bmp.readTemperature();
+  dados_finais.pressurePa= bmp.readPressure();
+  dados_finais.pressureBar = pressurePa * 1e-5;
+  dados_finais.altitude = bmp.readAltitude(1011.9);
 
     Serial.print(F("Temperature = "));
     Serial.print(bmp.readTemperature());
@@ -230,8 +264,6 @@ void ConfigFirebase() {
     Firebase.begin(&config, &auth);
     Firebase.reconnectWiFi(true);
 }
-// AS FUNCOES EnviarRegistros() E RegistrosPendentes() E RegravacaoDados() 
-// SAO FUNCAO DA FUNCAO enviarDadosFirebase()
 void EnviarRegistros() {
 
     enviados = 0;
@@ -633,13 +665,6 @@ void initTime() {
 
 }
 
-
-
-// =====================================================
-// VARIÁVEIS DA INTERRUPÇÃO
-// =====================================================
-
-// IMPORTANTE: volatile porque são alteradas pela interrupção
 volatile uint32_t pulsosChuva = 0;
 volatile uint32_t ultimoPulsoUS = 0;
 volatile unsigned long ultimoPulsoChuva = 0;
@@ -656,51 +681,54 @@ void IRAM_ATTR interrupcaoChuva()
         ultimoPulsoChuva = agora;
     }
 }
+//  FUNCAO PRECISA  SER  TESTADA
 void SensorVolumeChuva()
 {
-    static unsigned long pulsosProcessados = 0;
-    static float volumeML = 0.0;
-    static float volumeLitros = 0.0;
-
-    // =====================================================
-    // CONFIGURA O PINO UMA ÚNICA VEZ
-    // =====================================================
-
-    static bool inicializado = false;
-
     if (!inicializado)
     {
         pinMode(PINO_SENSOR, INPUT_PULLUP);
+        pcnt_config_t pcntConfig = {};
 
-        attachInterrupt(
-            digitalPinToInterrupt(PINO_SENSOR),
-            interrupcaoChuva,
-            FALLING
-        );
+        pcntConfig.pulse_gpio_num = PINO_SENSOR;
+        pcntConfig.ctrl_gpio_num = PCNT_PIN_NOT_USED;
+
+        pcntConfig.channel = PCNT_CHANNEL_0;
+        pcntConfig.unit = PCNT_UNIT_0;
+
+        // Conta somente na descida do sinal
+        pcntConfig.pos_mode = PCNT_COUNT_DIS;
+        pcntConfig.neg_mode = PCNT_COUNT_INC;
+
+        // Sem controle por outro GPIO
+        pcntConfig.lctrl_mode = PCNT_MODE_KEEP;
+        pcntConfig.hctrl_mode = PCNT_MODE_KEEP;
+
+        // Limites
+        pcntConfig.counter_h_lim = 32767;
+        pcntConfig.counter_l_lim = 0;
+
+        // Aplica configuração
+        pcnt_unit_config(&pcntConfig);
+
+        // Zera contador
+        pcnt_counter_pause(PCNT_UNIT_0);
+        pcnt_counter_clear(PCNT_UNIT_0);
+
+        // Começa a contar
+        pcnt_counter_resume(PCNT_UNIT_0);
 
         inicializado = true;
 
         Serial.println("Pluviometro iniciado");
         Serial.println("1 pulso = 15 mL");
-        Serial.println("Interrupcao ativada");
+        Serial.println("PCNT ativado");
     }
+    int16_t pulsosAtuais = 0;
 
-
-    // =====================================================
-    // COPIA O CONTADOR DA INTERRUPÇÃO
-    // =====================================================
-
-    unsigned long pulsosAtuais;
-
-    noInterrupts();
-    pulsosAtuais = pulsosChuva;
-    interrupts();
-
-
-    // =====================================================
-    // VERIFICA SE EXISTEM NOVOS PULSOS
-    // =====================================================
-
+    pcnt_get_counter_value(
+        PCNT_UNIT_0,
+        &pulsosAtuais
+    );
     if (pulsosAtuais > pulsosProcessados)
     {
         unsigned long novosPulsos =
@@ -708,23 +736,13 @@ void SensorVolumeChuva()
 
         pulsosProcessados = pulsosAtuais;
 
-
-        // =================================================
-        // ADICIONA O VOLUME
-        // =================================================
-
         volumeML += novosPulsos * ML_POR_PULSO;
 
         volumeLitros = volumeML / 1000.0;
 
-
-        // =================================================
-        // MOSTRA NO MONITOR SERIAL
-        // =================================================
-
         Serial.println("--------------------------------");
 
-        Serial.print("Pulso: ");
+        Serial.print("Pulsos: ");
         Serial.println(pulsosAtuais);
 
         Serial.print("Novos pulsos: ");
@@ -755,25 +773,19 @@ void calculaVelocidadeVento(float frequencia) {
 }
 void SensorVelociadadeVento() {
 
-  static bool estadoAnterior = LOW;
-  static uint32_t ultimoPulso = 0;
+   bool estadoAtual = digitalRead(PINO_SENSOR_VENTO);
 
-  static float freqBuffer[10] = {0};
-  static uint8_t indice = 0;
-  static uint8_t amostras = 0;
-
-  bool estadoAtual = digitalRead(PINO_SENSOR_VENTO);
-
-  // Borda de subida
-  if (estadoAtual == HIGH && estadoAnterior == LOW) {
+  // Detecta borda de subida
+  if (estadoAtual && !estadoAnterior) {
 
     uint32_t agora = micros();
 
-    if (ultimoPulso != 0) {
+    if (ultimoPulso) {
 
-      float frequencia = 1000000.0f / (float)(agora - ultimoPulso);
+      // Calcula frequência
+      float frequencia = 1000000.0 / (agora - ultimoPulso);
 
-      // Armazena no buffer circular
+      // Salva no buffer circular
       freqBuffer[indice] = frequencia;
       indice = (indice + 1) % 10;
 
@@ -781,19 +793,20 @@ void SensorVelociadadeVento() {
         amostras++;
 
       // Calcula média
-      float soma = 0.0f;
-      for (uint8_t i = 0; i < amostras; i++) {
+      float soma = 0;
+
+      for (uint8_t i = 0; i < amostras; i++)
         soma += freqBuffer[i];
-      }
 
       float freqMedia = soma / amostras;
 
       Serial.print("Freq: ");
       Serial.print(freqMedia, 2);
       Serial.println(" Hz");
-      calculaVelocidadeVento(freqMedia);
 
+      calculaVelocidadeVento(freqMedia);
     }
+
     ultimoPulso = agora;
   }
 
@@ -828,7 +841,23 @@ void ota() {
     ArduinoOTA.begin();
     Serial.println("OTA habilitado. IP: " + WiFi.localIP().toString());
 }
+void SensorHumidade() {
+    temperatura = dht.readTemperature();
+    umidade = dht.readHumidity();
 
+    if (isnan(temperatura) || isnan(umidade)) {
+        Serial.println("Erro ao ler o DHT");
+        return;
+    }
+
+    Serial.print("Temperatura: ");
+    Serial.print(temperatura);
+    Serial.println(" °C");
+
+    Serial.print("Umidade: ");
+    Serial.print(umidade);
+    Serial.println(" %");
+}
 
 void setup() {
   // pinMode(pinoDO, INPUT);
@@ -847,49 +876,49 @@ void setup() {
     Serial.println("LittleFS montado com sucesso!");
     
     wifi();   // conecta UMA vez, aqui no setup
-    if (WiFi.status() == WL_CONNECTED) {
-        ota();  // só inicializa OTA se o WiFi realmente conectou
-    }
+
 }
 
 void loop() {
        
      
-        ArduinoOTA.handle();
+        // ArduinoOTA.handle();
 
+   
     // delay(1000);
+    if (WiFi.status() == WL_CONNECTED) {
+        // ota();  // só inicializa OTA se o WiFi realmente conectou
+   
+    }
 
-    // wifi();    // conexao wifi ok
-    // ota();  // ← habilita OTA
-    // delay(1000);
-    // ConfigFirebase();
-    // delay(1000);
-    // initTime();
+    ConfigFirebase();
+    delay(1000);
+    initTime();
 
-
+//  SensorHumidade() // precisa ser testado
     // SensorVolumeChuva();  // esta pronta
-    // SensorVelociadadeVento();  // esta pronto
+    SensorVelociadadeVento();  // esta pronto
     // SensorDirecaoVento();
-    // SensorLuminosidade();
-    // SensorUv();  // esta pronto
-    // SensorPressaoAtm();   // esta pronto
-    // LerGps(); //esta pronto
+    // SensorLuminosidade(); // precisa ser calibrado
+    SensorUv();  // esta pronto
+    SensorPressaoAtm();   // esta pronto
+    LerGps(); //esta pronto
     
-    // delay(1000);
+    delay(1000);
 
-    // salvarDados();
-    // delay(1000);
+    salvarDados();
+    delay(1000);
 
-    // lerDados(); // funcao para verificar se os dados estao sendo salvos corretamente
-    // delay(1000);
+    lerDados(); // funcao para verificar se os dados estao sendo salvos corretamente
+    delay(1000);
 
-    // enviarDadosFirebase();
-    // delay(1000);
+    enviarDadosFirebase();
+    delay(1000);
 
-    // limparArquivo();
-    // delay(1000);
+    limparArquivo();
+    delay(1000);
 
-    // light_sleep();
-    // delay(1000);
+    light_sleep();
+    delay(1000);
 
 }
