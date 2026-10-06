@@ -21,14 +21,14 @@ TinyGPSPlus gps;
 HardwareSerial SerialGPS(2);
 
 // #define DELAY_COLETA 60000  //1 minuto
+#define DELAY_COLETA 600000 // 10 minuto
 // #define DELAY_COLETA 300000  //5 minutos
-#define DELAY_COLETA 600000  //10 minutos
 
 #define GPS_RX 16
 #define GPS_TX 17
 #define GPS_BAUD 9600
 #define PINO_SENSOR_VENTO 25  // ajuste para o seu pino
-#define DHTPIN 2
+#define DHTPIN 5
 #define DHTTYPE DHT11   // Troque para DHT22 se necessário
 #define pino 10
 DHT dht(DHTPIN, DHTTYPE);
@@ -48,9 +48,18 @@ const char* password = "20#UERGSNET99";     // Colocar a senha da rede Wi-Fi
 // const int pinoDO = 4;     // trocado
 
 
-#define FIREBASE_DATABASE_URL "https://bancodedados-a7591-default-rtdb.firebaseio.com"
-#define FIREBASE_API_KEY "AIzaSyCG6pcJI9JV8G6gW8F8HAhfEGJvw8vhXDY"
-#define FIREBASE_AUTH "09fFbaRrhJkNPoDVwRE3TszPG2m7TeUZKWuoAJUF"
+// #define FIREBASE_DATABASE_URL "https://bancodedados-a7591-default-rtdb.firebaseio.com"
+// #define FIREBASE_API_KEY "AIzaSyCG6pcJI9JV8G6gW8F8HAhfEGJvw8vhXDY"
+// #define FIREBASE_AUTH "09fFbaRrhJkNPoDVwRE3TszPG2m7TeUZKWuoAJUF"
+
+
+// banco original
+
+#define FIREBASE_DATABASE_URL "https://tempo-uergs-default-rtdb.firebaseio.com"
+#define FIREBASE_API_KEY "AIzaSyCY7Dg8dZgm0twrJVHk3XHibbEFrnDE_xc"
+#define FIREBASE_AUTH "HuqOjUMmciX458Huigvd6pJlFZ6LCf9p43WUCZCg"
+
+
 
 #define FIREBASE_ESTACAO_ID "ESTACAO_001"
 #define FIREBASE_PATH "/estacao/" FIREBASE_ESTACAO_ID
@@ -117,7 +126,12 @@ typedef struct {
     float direcaoVento = 0.0;
     bool direcaoVentoAtiva;
 
-    // SENSOR - GPS
+    // Sensor Humidade
+    float temperatura_h = 0;
+    float humidade = 0;
+
+
+    //GPS
   
     double latitude = 0;
     double longitude = 0;
@@ -845,22 +859,27 @@ void SensorHumidade() {
     temperatura = dht.readTemperature();
     umidade = dht.readHumidity();
 
+    dados_finais.temperatura_h = dht.readTemperature();
+    dados_finais.humidade = dht.readHumidity();
+
+
     if (isnan(temperatura) || isnan(umidade)) {
         Serial.println("Erro ao ler o DHT");
         return;
     }
 
     Serial.print("Temperatura: ");
-    Serial.print(temperatura);
+    Serial.print(dados_finais.temperatura_h);
     Serial.println(" °C");
 
     Serial.print("Umidade: ");
-    Serial.print(umidade);
+    Serial.print(dados_finais.humidade);
     Serial.println(" %");
 }
 
 void setup() {
   // pinMode(pinoDO, INPUT);
+  dht.begin();
   pinMode(pinoLED, OUTPUT);
   Serial.begin(9600); 
   analogReadResolution(12); // ESP32: 0–4095
@@ -885,7 +904,7 @@ void loop() {
         // ArduinoOTA.handle();
 
    
-    // delay(1000);
+    delay(1000);
     if (WiFi.status() == WL_CONNECTED) {
         // ota();  // só inicializa OTA se o WiFi realmente conectou
    
@@ -895,7 +914,7 @@ void loop() {
     delay(1000);
     initTime();
 
-//  SensorHumidade() // precisa ser testado
+    SensorHumidade(); //esta pronto //pino 5
     // SensorVolumeChuva();  // esta pronta
     SensorVelociadadeVento();  // esta pronto
     // SensorDirecaoVento();
@@ -922,3 +941,9 @@ void loop() {
     delay(1000);
 
 }
+// void loop() {
+ 
+//      SensorHumidade(); // precisa ser testado
+//      Serial.print("dentro do loop");
+
+// }
