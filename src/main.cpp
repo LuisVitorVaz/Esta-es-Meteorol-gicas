@@ -15,7 +15,7 @@
 #include <TinyGPSPlus.h>
 #include <ArduinoOTA.h>
 #include <DHT.h>
-// config gps
+
 TinyGPSPlus gps;
 
 HardwareSerial SerialGPS(2);
@@ -40,27 +40,6 @@ uint32_t pulsosVento = 0;
 const char* ssid = "REDE20";  // Colocar o nome da rede Wi-Fi
 const char* password = "20#UERGSNET99";     // Colocar a senha da rede Wi-Fi
 
-// const char* ssid = "Camuflado STG";  // Colocar o nome da rede Wi-Fi
-// const char* password = "@veialoka#rumo60@";     // Colocar a senha da rede Wi-Fi
-
-
-
-// const int pinoDO = 4;     // trocado
-
-
-
-// =====================================================
-// FIREBASE - BANCO 1
-// =====================================================
-
-// #define FIREBASE_DATABASE_URL_1 "https://bancodedados-a7591-default-rtdb.firebaseio.com"
-// #define FIREBASE_API_KEY_1      "AIzaSyCG6pcJI9JV8G6gW8F8HAhfEGJvw8vhXDY"
-// #define FIREBASE_AUTH_1         "09fFbaRrhJkNPoDVwRE3TszPG2m7TeUZKWuoAJUF"
-
-
-// // =====================================================
-// // FIREBASE - BANCO 2 (ORIGINAL)
-// // =====================================================
 
 #define FIREBASE_DATABASE_URL_2 "https://tempo-uergs-default-rtdb.firebaseio.com"
 #define FIREBASE_API_KEY_2      "AIzaSyCY7Dg8dZgm0twrJVHk3XHibbEFrnDE_xc"
@@ -77,12 +56,6 @@ FirebaseConfig config;
 FirebaseAuth auth;
 bool firebase_flag = true;
 
-// #define BMP_SCK  (13)
-// #define BMP_MISO (12)
-// #define BMP_MOSI (11)
-// #define BMP_CS   (10)
-
-// a pensar 
 typedef struct {
 
     // INFO DA ESTAÇÃO
@@ -699,7 +672,6 @@ volatile uint32_t pulsosChuva = 0;
 volatile uint32_t ultimoPulsoUS = 0;
 volatile unsigned long ultimoPulsoChuva = 0;
 
-// essa funcao serve para quando tiver varias coisas funcionando ao mesmo tempo nao perder medicoes 
 void IRAM_ATTR interrupcaoChuva()
 {
     unsigned long agora = millis();
@@ -789,7 +761,6 @@ void SensorVolumeChuva()
         Serial.println("--------------------------------");
     }
 }
-
 void calculaVelocidadeVento(float frequencia) {
   float velocidade = -0.114f + (1.17f * frequencia) - (0.268f * frequencia * frequencia);
 
@@ -845,35 +816,6 @@ void SensorVelociadadeVento() {
 
   estadoAnterior = estadoAtual;
 }
-void ota() {
-    ArduinoOTA.setHostname("ESP32-EstacaoMeteo");
-    // ArduinoOTA.setPassword("suaSenhaAqui"); // recomendado
-
-    ArduinoOTA.onStart([]() {
-        String type = (ArduinoOTA.getCommand() == U_FLASH) ? "sketch" : "filesystem";
-        Serial.println("Iniciando OTA: " + type);
-    });
-
-    ArduinoOTA.onEnd([]() {
-        Serial.println("\nOTA concluído!");
-    });
-
-    ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
-        Serial.printf("Progresso: %u%%\r", (progress * 100) / total);
-    });
-
-    ArduinoOTA.onError([](ota_error_t error) {
-        Serial.printf("Erro OTA [%u]: ", error);
-        if (error == OTA_AUTH_ERROR) Serial.println("Falha de autenticação");
-        else if (error == OTA_BEGIN_ERROR) Serial.println("Falha ao iniciar");
-        else if (error == OTA_CONNECT_ERROR) Serial.println("Falha de conexão");
-        else if (error == OTA_RECEIVE_ERROR) Serial.println("Falha ao receber");
-        else if (error == OTA_END_ERROR) Serial.println("Falha ao finalizar");
-    });
-
-    ArduinoOTA.begin();
-    Serial.println("OTA habilitado. IP: " + WiFi.localIP().toString());
-}
 void SensorHumidade() {
     temperatura = dht.readTemperature();
     umidade = dht.readHumidity();
@@ -895,100 +837,21 @@ void SensorHumidade() {
     Serial.print(dados_finais.humidade);
     Serial.println(" %");
 }
-float medirTensaoBateria(int PINO_BATERIA) {
-  const float CALIBRACAO_ADC = 0.9517;
-
-  uint32_t soma = 0;
-
-  for (int i = 0; i < 32; i++) {
-    soma += analogReadMilliVolts(PINO_BATERIA);
-    delay(2);
-  }
-
-  float tensaoADC = (soma / 32.0) / 1000.0;
-  tensaoADC *= CALIBRACAO_ADC;
-
-  float tensaoBateria =
-      tensaoADC * (68000.0 + 24000.0) / 24000.0;
-
-  Serial.print("Pino ");
-  Serial.print(PINO_BATERIA);
-  Serial.print(" | Tensao ADC corrigida: ");
-  Serial.print(tensaoADC, 3);
-  Serial.print(" V | Tensao bateria: ");
-  Serial.print(tensaoBateria, 3);
-  Serial.println(" V");
-
-  return tensaoBateria;
-
-}
-void controlarBaterias() {
-  float valorBateria = medirTensaoBateria(34);
-
-  if (valorBateria > valorReferencia) {
-    // Bateria 1 OK: seleciona bateria 1
-       digitalWrite(26, LOW);
-       digitalWrite(27, HIGH);
-
-    Serial.println("Bateria 1 selecionada.");
-  }
-  else {
-    // Bateria 1 baixa: desativa bateria 1
-        digitalWrite(27, LOW);
-
-    // Verifica bateria 2
-        valorBateria = medirTensaoBateria(35);
-
-        if (valorBateria > valorReferencia) {
-        // Bateria 2 OK: seleciona bateria 2
-        digitalWrite(27, LOW);
-        digitalWrite(26, HIGH);
-
-        Serial.println("Bateria 2 selecionada.");
-        }
-        else {
-        // Ambas abaixo do limite
-        digitalWrite(27, LOW);
-        digitalWrite(26, LOW);
-
-      Serial.println("ALERTA: ambas as baterias abaixo de 5.6 V!");
-      Serial.println("Sistema desligado para proteger as baterias.");
-    }
-  }
-}
 void setup() {
-  // pinMode(pinoDO, INPUT);
   dht.begin();
   pinMode(pinoLED, OUTPUT);
   Serial.begin(9600); 
-  // Entradas para medir as baterias
- 
-  pinMode(34, INPUT);
-  pinMode(35, INPUT);
-
-  pinMode(27, OUTPUT);
-  pinMode(26, OUTPUT);
-
-  digitalWrite(27, HIGH);
-  digitalWrite(26, LOW);
-
   analogReadResolution(12); // ESP32: 0–4095
   pinMode(PINO_SENSOR_VENTO, INPUT);
   SerialGPS.begin(GPS_BAUD,SERIAL_8N1,GPS_RX,GPS_TX);
-
-    // Monta o sistema de arquivos LittleFS
-    if (!LittleFS.begin(true)) {
+  if (!LittleFS.begin(true)) {
         Serial.println("ERRO: falha ao montar LittleFS!");
         return;
-    }
-
+  }
     Serial.println("LittleFS montado com sucesso!");
-    
-    wifi();   // conecta UMA vez, aqui no setup
+    wifi(); 
 
 }
-float valorBateria;
-
 // SENSOR DE DIRECAO DO VENTO
 
 void detectarDirecao() {
@@ -1011,24 +874,15 @@ void detectarDirecao() {
   Serial.println();
 }
 void loop() {
-       
-     
-        // ArduinoOTA.handle();
-
    
     delay(1000);
     if (WiFi.status() == WL_CONNECTED) {
-        // ota();  // só inicializa OTA se o WiFi realmente conectou
-   
+          
     }
 
-    // ConfigFirebase();
-    // ConfigFirebase(FIREBASE_DATABASE_URL_1,FIREBASE_API_KEY_1,FIREBASE_AUTH_1);
-    // delay(1000);
     ConfigFirebase(FIREBASE_DATABASE_URL_2,FIREBASE_API_KEY_2,FIREBASE_AUTH_2);
     delay(1000);
     initTime();
-
     SensorHumidade(); //esta pronto //pino 5
     SensorVolumeChuva();  // esta pronta
     SensorVelociadadeVento();  // esta pronto
@@ -1037,7 +891,6 @@ void loop() {
     SensorUv();  // esta pronto
     SensorPressaoAtm();   // esta pronto
     LerGps(); //esta pronto
-    // controlarBaterias();
     // detectarDirecao(); // pronto
     delay(1000);
 
@@ -1057,14 +910,3 @@ void loop() {
     delay(1000);
 
 }
-// void loop() {
- 
-//     //  SensorHumidade(); // precisa ser testado
-//         // controlarBaterias();
-//     // detectarDirecao();
-    // SensorVelociadadeVento();  // esta pronto
-    // delay(1000);
-
-//     // Serial.print("dentro do loop");
-
-// }
