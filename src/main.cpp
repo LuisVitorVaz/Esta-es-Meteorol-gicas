@@ -20,14 +20,14 @@ TinyGPSPlus gps;
 
 HardwareSerial SerialGPS(2);
 
-// #define DELAY_COLETA 60000  //1 minuto
-#define DELAY_COLETA 600000 // 10 minuto
+#define DELAY_COLETA 60000  //1 minuto
+// #define DELAY_COLETA 600000 // 10 minuto
 // #define DELAY_COLETA 300000  //5 minutos
 
 #define GPS_RX 16
 #define GPS_TX 17
 #define GPS_BAUD 9600
-#define PINO_SENSOR_VENTO 25  // ajuste para o seu pino
+#define PINO_SENSOR_VENTO 25  
 #define DHTPIN 5
 #define DHTTYPE DHT11   // Troque para DHT22 se necessário
 #define pino 10
@@ -48,16 +48,23 @@ const char* password = "20#UERGSNET99";     // Colocar a senha da rede Wi-Fi
 // const int pinoDO = 4;     // trocado
 
 
-// #define FIREBASE_DATABASE_URL "https://bancodedados-a7591-default-rtdb.firebaseio.com"
-// #define FIREBASE_API_KEY "AIzaSyCG6pcJI9JV8G6gW8F8HAhfEGJvw8vhXDY"
-// #define FIREBASE_AUTH "09fFbaRrhJkNPoDVwRE3TszPG2m7TeUZKWuoAJUF"
+
+// =====================================================
+// FIREBASE - BANCO 1
+// =====================================================
+
+// #define FIREBASE_DATABASE_URL_1 "https://bancodedados-a7591-default-rtdb.firebaseio.com"
+// #define FIREBASE_API_KEY_1      "AIzaSyCG6pcJI9JV8G6gW8F8HAhfEGJvw8vhXDY"
+// #define FIREBASE_AUTH_1         "09fFbaRrhJkNPoDVwRE3TszPG2m7TeUZKWuoAJUF"
 
 
-// banco original
+// // =====================================================
+// // FIREBASE - BANCO 2 (ORIGINAL)
+// // =====================================================
 
-#define FIREBASE_DATABASE_URL "https://tempo-uergs-default-rtdb.firebaseio.com"
-#define FIREBASE_API_KEY "AIzaSyCY7Dg8dZgm0twrJVHk3XHibbEFrnDE_xc"
-#define FIREBASE_AUTH "HuqOjUMmciX458Huigvd6pJlFZ6LCf9p43WUCZCg"
+#define FIREBASE_DATABASE_URL_2 "https://tempo-uergs-default-rtdb.firebaseio.com"
+#define FIREBASE_API_KEY_2      "AIzaSyCY7Dg8dZgm0twrJVHk3XHibbEFrnDE_xc"
+#define FIREBASE_AUTH_2         "HuqOjUMmciX458Huigvd6pJlFZ6LCf9p43WUCZCg"
 
 
 
@@ -145,6 +152,9 @@ bool dados_Enviados = false;
 int totalRegistros = 0;
 int enviados = 0;
 
+int bateriaSelecionada = 1;
+
+
 // const int pinoDO = 34;     // saída digital do sensor
 int pinoLED = 13;   // LED
 int pinoAO = 34;    // pino analógico (ADC)
@@ -154,7 +164,7 @@ int PINO_SENSOR = 27;
 float ML_POR_PULSO = 15.0;
 // Debounce do reed switch
 unsigned long DEBOUNCE_MS = 300; // 300 ms
-
+int valorReferencia = 4;   // valor referencia da bateria
 static bool estadoAnterior = LOW;
 static uint32_t ultimoPulso = 0;
 static float freqBuffer[10] = {0};
@@ -267,13 +277,13 @@ void SensorPressaoAtm(){
     delay(2000);
 }
 // ///////////////////////////////////////////
-void ConfigFirebase() {
+void ConfigFirebase(const char* databaseURL,const char* apiKey,const char* authToken) {
 
-    config.api_key = FIREBASE_API_KEY;
-    config.database_url = FIREBASE_DATABASE_URL;
+    config.api_key = apiKey;
+    config.database_url = databaseURL;
 
-    // Autenticação via legacy token (database secret)
-    config.signer.tokens.legacy_token = FIREBASE_AUTH;
+    // Autenticação via legacy token
+    config.signer.tokens.legacy_token = authToken;
 
     Firebase.begin(&config, &auth);
     Firebase.reconnectWiFi(true);
@@ -323,6 +333,12 @@ void EnviarRegistros() {
         registroJson.set("luminosidade/valor", registro.luminosidade);
         registroJson.set("luminosidade/unidade", "lux");
         registroJson.set("luminosidade/ativo", registro.luminosidadeAtiva);
+
+        registroJson.set("humidade/humidade/valor", registro.humidade);
+        registroJson.set("humidade/humidade/unidade", "%");
+        registroJson.set("humidade/temperatura/unidade", "°C");
+        registroJson.set("humidade/temperatura/valor",registro.temperatura_h);
+
 
         if (Firebase.RTDB.pushJSON(&firebaseData, String(FIREBASE_PATH) + "/leituras", &registroJson)) {
 
@@ -781,6 +797,9 @@ void calculaVelocidadeVento(float frequencia) {
     velocidade = 0.0f;
   }
 
+  dados_finais.velocidadeVento = velocidade;
+  dados_finais.velocidadeVentoAtiva = true;
+
   Serial.print("Velocidade: ");
   Serial.print(velocidade, 2);
   Serial.println(" m/s");
@@ -876,12 +895,83 @@ void SensorHumidade() {
     Serial.print(dados_finais.humidade);
     Serial.println(" %");
 }
+float medirTensaoBateria(int PINO_BATERIA) {
+  const float CALIBRACAO_ADC = 0.9517;
 
+  uint32_t soma = 0;
+
+  for (int i = 0; i < 32; i++) {
+    soma += analogReadMilliVolts(PINO_BATERIA);
+    delay(2);
+  }
+
+  float tensaoADC = (soma / 32.0) / 1000.0;
+  tensaoADC *= CALIBRACAO_ADC;
+
+  float tensaoBateria =
+      tensaoADC * (68000.0 + 24000.0) / 24000.0;
+
+  Serial.print("Pino ");
+  Serial.print(PINO_BATERIA);
+  Serial.print(" | Tensao ADC corrigida: ");
+  Serial.print(tensaoADC, 3);
+  Serial.print(" V | Tensao bateria: ");
+  Serial.print(tensaoBateria, 3);
+  Serial.println(" V");
+
+  return tensaoBateria;
+
+}
+void controlarBaterias() {
+  float valorBateria = medirTensaoBateria(34);
+
+  if (valorBateria > valorReferencia) {
+    // Bateria 1 OK: seleciona bateria 1
+       digitalWrite(26, LOW);
+       digitalWrite(27, HIGH);
+
+    Serial.println("Bateria 1 selecionada.");
+  }
+  else {
+    // Bateria 1 baixa: desativa bateria 1
+        digitalWrite(27, LOW);
+
+    // Verifica bateria 2
+        valorBateria = medirTensaoBateria(35);
+
+        if (valorBateria > valorReferencia) {
+        // Bateria 2 OK: seleciona bateria 2
+        digitalWrite(27, LOW);
+        digitalWrite(26, HIGH);
+
+        Serial.println("Bateria 2 selecionada.");
+        }
+        else {
+        // Ambas abaixo do limite
+        digitalWrite(27, LOW);
+        digitalWrite(26, LOW);
+
+      Serial.println("ALERTA: ambas as baterias abaixo de 5.6 V!");
+      Serial.println("Sistema desligado para proteger as baterias.");
+    }
+  }
+}
 void setup() {
   // pinMode(pinoDO, INPUT);
   dht.begin();
   pinMode(pinoLED, OUTPUT);
   Serial.begin(9600); 
+  // Entradas para medir as baterias
+ 
+  pinMode(34, INPUT);
+  pinMode(35, INPUT);
+
+  pinMode(27, OUTPUT);
+  pinMode(26, OUTPUT);
+
+  digitalWrite(27, HIGH);
+  digitalWrite(26, LOW);
+
   analogReadResolution(12); // ESP32: 0–4095
   pinMode(PINO_SENSOR_VENTO, INPUT);
   SerialGPS.begin(GPS_BAUD,SERIAL_8N1,GPS_RX,GPS_TX);
@@ -897,7 +987,29 @@ void setup() {
     wifi();   // conecta UMA vez, aqui no setup
 
 }
+float valorBateria;
 
+// SENSOR DE DIRECAO DO VENTO
+
+void detectarDirecao() {
+  static bool ant[4] = {0, 0, 0, 0};
+  const uint8_t p[4] = {18, 19, 2, 4}; // N, S, L, O
+  const char* d[4] = {"Norte", "Sul", "Leste", "Oeste"};
+
+  for (int i = 0; i < 4; i++) {
+    bool v = digitalRead(p[i]);
+
+    Serial.printf("%s: %d | ", d[i], v);
+
+    if (v && !ant[i]) {
+      Serial.printf("DIRECAO: %s\n", d[i]);
+    }
+
+    ant[i] = v;
+  }
+
+  Serial.println();
+}
 void loop() {
        
      
@@ -910,19 +1022,23 @@ void loop() {
    
     }
 
-    ConfigFirebase();
+    // ConfigFirebase();
+    // ConfigFirebase(FIREBASE_DATABASE_URL_1,FIREBASE_API_KEY_1,FIREBASE_AUTH_1);
+    // delay(1000);
+    ConfigFirebase(FIREBASE_DATABASE_URL_2,FIREBASE_API_KEY_2,FIREBASE_AUTH_2);
     delay(1000);
     initTime();
 
     SensorHumidade(); //esta pronto //pino 5
-    // SensorVolumeChuva();  // esta pronta
+    SensorVolumeChuva();  // esta pronta
     SensorVelociadadeVento();  // esta pronto
     // SensorDirecaoVento();
     // SensorLuminosidade(); // precisa ser calibrado
     SensorUv();  // esta pronto
     SensorPressaoAtm();   // esta pronto
     LerGps(); //esta pronto
-    
+    // controlarBaterias();
+    // detectarDirecao(); // pronto
     delay(1000);
 
     salvarDados();
@@ -943,7 +1059,12 @@ void loop() {
 }
 // void loop() {
  
-//      SensorHumidade(); // precisa ser testado
-//      Serial.print("dentro do loop");
+//     //  SensorHumidade(); // precisa ser testado
+//         // controlarBaterias();
+//     // detectarDirecao();
+    // SensorVelociadadeVento();  // esta pronto
+    // delay(1000);
+
+//     // Serial.print("dentro do loop");
 
 // }
