@@ -723,66 +723,140 @@ void calculaVelocidadeVento(float frequencia) {
 void SensorVelociadadeVento() {
   const uint32_t JANELA_MS = 15000;   // 15 s exclusivos para o vento
 
-  uint32_t pulsos = 0;
-  uint32_t ultimoUs = 0;
-  bool ant = digitalRead(PINO_SENSOR_VENTO);
+  // reinicia o buffer para esta janela
+  indice = 0;
+  amostras = 0;
+  ultimoPulso = 0;                    // o 1º pulso só serve de referência
+  uint32_t pulsosJanela = 0;
+  float freqMedia = 0.0f;
 
-  Serial.println("Medindo vento (15 s)...");   // antes da janela
-  Serial.flush();                             // garante que terminou de enviar
+  estadoAnterior = digitalRead(PINO_SENSOR_VENTO);
+
+  Serial.println("Medindo vento (15 s)...");
+  Serial.flush();
 
   uint32_t t0 = millis();
 
   // ===== A PARTIR DAQUI: SÓ MONITORA O PINO =====
   while (millis() - t0 < JANELA_MS) {
-    bool atual = digitalRead(PINO_SENSOR_VENTO);
+    bool estadoAtual = digitalRead(PINO_SENSOR_VENTO);
 
-    if (atual && !ant) {                      // borda de subida
+    // Detecta borda de subida
+    if (estadoAtual && !estadoAnterior) {
       uint32_t agora = micros();
-      if (agora - ultimoUs > 2000) {          // debounce 2 ms
-        pulsos++;
-        ultimoUs = agora;
+
+      if (ultimoPulso == 0) {
+        ultimoPulso = agora;                       // primeiro pulso: só referência
+      }
+      else if ((agora - ultimoPulso) > 2000) {     // debounce 2 ms
+        pulsosJanela++;
+
+        // frequência instantânea (igual à função original)
+        float frequencia = 1000000.0f / (agora - ultimoPulso);
+
+        // salva no buffer circular de 10 amostras
+        freqBuffer[indice] = frequencia;
+        indice = (indice + 1) % 10;
+        if (amostras < 10) amostras++;
+
+        // média das amostras
+        float soma = 0;
+        for (uint8_t i = 0; i < amostras; i++) soma += freqBuffer[i];
+        freqMedia = soma / amostras;
+
+        ultimoPulso = agora;
       }
     }
-    ant = atual;
+    estadoAnterior = estadoAtual;
   }
   // ===== FIM DA JANELA =====
 
-  float frequencia = pulsos / (JANELA_MS / 1000.0f);   // Hz
+  Serial.printf("Pulsos: %u | Amostras: %u | Freq media: %.2f Hz\n",
+                pulsosJanela, amostras, freqMedia);
 
-  Serial.printf("Pulsos: %u | Freq: %.2f Hz\n", pulsos, frequencia);
-  calculaVelocidadeVento(frequencia);          // original, intacta
+  calculaVelocidadeVento(freqMedia);   // original, intacta
 }
+// void detectarDirecao() {
+//   static bool ant[4] = {0, 0, 0, 0};
+
+//   const uint8_t p[4] = {34, 35,32,33}; // N, S, L, O
+//   const char* d[4] = {"Norte", "Sul", "Leste", "Oeste"};
+
+//   for (int i = 0; i < 4; i++) {
+//     bool v = analogRead(p[i]);
+
+//     Serial.printf("%s: %d | ", d[i], v);
+
+//     // Transição de alto para baixo
+//     if (!v && ant[i]) {
+//       const char* direcao = "";
+
+//       if (i == 0) direcao = "Norte";
+//       if (i == 1) direcao = "Sul";
+//       if (i == 2) direcao = "Leste";
+//       if (i == 3) direcao = "Oeste";
+
+//       Serial.printf("DIRECAO DETECTADA: %s\n", direcao);
+//       dados_finais.direcaoVento = direcao;
+
+//       // Aqui você pode enviar 'direcao' ao banco de dados.
+//       // Exemplo: enviarDirecaoBanco(direcao);
+//     }
+
+//     ant[i] = v;
+//   }
+
+//   Serial.println();
+// }
 void detectarDirecao() {
-  static bool ant[4] = {0, 0, 0, 0};
+  static bool ant[4];
+  static bool primeiraLeitura = true;
 
-  const uint8_t p[4] = {34, 35,32,33}; // N, S, L, O
-  const char* d[4] = {"Norte", "Sul", "Leste", "Oeste"};
+  const uint8_t p[4] = {34, 35, 32, 33};              // N, S, L, O
+  const char* d[4]   = {"Norte", "Sul", "Leste", "Oeste"};
 
+  bool v[4];
+
+  // Leitura digital com confirmação (evita ruído)
   for (int i = 0; i < 4; i++) {
-    bool v = analogRead(p[i]);
-
-    Serial.printf("%s: %d | ", d[i], v);
-
-    // Transição de alto para baixo
-    if (!v && ant[i]) {
-      const char* direcao = "";
-
-      if (i == 0) direcao = "Norte";
-      if (i == 1) direcao = "Sul";
-      if (i == 2) direcao = "Leste";
-      if (i == 3) direcao = "Oeste";
-
-      Serial.printf("DIRECAO DETECTADA: %s\n", direcao);
-      dados_finais.direcaoVento = direcao;
-
-      // Aqui você pode enviar 'direcao' ao banco de dados.
-      // Exemplo: enviarDirecaoBanco(direcao);
-    }
-
-    ant[i] = v;
+    bool a = digitalRead(p[i]);
+    delayMicroseconds(200);
+    bool b = digitalRead(p[i]);
+    v[i] = (a == b) ? a : ant[i];   // se as duas leituras divergem, mantém o anterior
   }
 
-  Serial.println();
+  // Primeira execução: só guarda o estado inicial, seja qual for
+  if (primeiraLeitura) {
+    for (int i = 0; i < 4; i++) ant[i] = v[i];
+    primeiraLeitura = false;
+
+    for (int i = 0; i < 4; i++) {
+      if (v[i] == 0) {
+        dados_finais.direcaoVento = d[i];
+        dados_finais.direcaoVentoAtiva = true;
+      }
+    }
+    Serial.printf("Estado inicial: N=%d S=%d L=%d O=%d\n", v[0], v[1], v[2], v[3]);
+    return;
+  }
+
+  // Detecta qualquer mudança em cada pino
+  for (int i = 0; i < 4; i++) {
+    if (v[i] != ant[i]) {
+      if (v[i] == 0) {
+        Serial.printf("%s: 1 -> 0 (ATIVADO)\n", d[i]);
+        dados_finais.direcaoVento = d[i];          // novo sentido ativo
+        dados_finais.direcaoVentoAtiva = true;
+      } else {
+        Serial.printf("%s: 0 -> 1 (DESATIVADO)\n", d[i]);
+      }
+      ant[i] = v[i];
+    }
+  }
+
+  Serial.printf("N=%d S=%d L=%d O=%d | Direcao atual: %s\n",
+                v[0], v[1], v[2], v[3],
+                dados_finais.direcaoVento.c_str());
 }
 void SensorHumidade() {
     temperatura = dht.readTemperature();
