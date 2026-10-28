@@ -28,6 +28,7 @@ HardwareSerial SerialGPS(2);
 #define GPS_TX 17
 #define GPS_BAUD 9600
 #define PINO_SENSOR_VENTO 25  
+#define PINO_SENSOR_LUZ 18
 #define DHTPIN 5
 #define DHTTYPE DHT11   // Troque para DHT22 se necessário
 #define pino 10
@@ -40,12 +41,9 @@ uint32_t pulsosVento = 0;
 const char* ssid = "REDE20";  // Colocar o nome da rede Wi-Fi
 const char* password = "20#UERGSNET99";     // Colocar a senha da rede Wi-Fi
 
-
 #define FIREBASE_DATABASE_URL_2 "https://tempo-uergs-default-rtdb.firebaseio.com"
 #define FIREBASE_API_KEY_2      "AIzaSyCY7Dg8dZgm0twrJVHk3XHibbEFrnDE_xc"
 #define FIREBASE_AUTH_2         "HuqOjUMmciX458Huigvd6pJlFZ6LCf9p43WUCZCg"
-
-
 
 #define FIREBASE_ESTACAO_ID "ESTACAO_001"
 #define FIREBASE_PATH "/estacao/" FIREBASE_ESTACAO_ID
@@ -58,13 +56,9 @@ bool firebase_flag = true;
 
 typedef struct {
 
-    // INFO DA ESTAÇÃO
-
     char nomeEstacao[50];
     char firmware[20];
     bool estacaoAtiva;
-
-    // DATA / HORA
 
     uint32_t timestamp;
 
@@ -75,25 +69,15 @@ typedef struct {
     uint8_t minuto = 0;
     uint8_t segundo = 0;
 
-    // SENSOR - LUMINOSIDADE
-
     float luminosidade;
     bool luminosidadeAtiva;
 
-    // SENSOR - UV
-
     float valor = 0;
-
-
-    // SENSOR - PRESSÃO ATMOSFÉRICA
 
     float temperatura = 0;
     float pressurePa = 0;
     float pressureBar = 0;
     float altitude = 0;
-
-
-    // SENSOR - CHUVA
 
     float volumeChuva = 0.0;
     bool chuvaAtiva;
@@ -103,16 +87,14 @@ typedef struct {
     float velocidadeVento = 0.0;
     bool velocidadeVentoAtiva;
 
-    float direcaoVento = 0.0;
+    // DIRECAO DO VENTO 
+    String direcaoVento = "";
     bool direcaoVentoAtiva;
 
     // Sensor Humidade
     float temperatura_h = 0;
     float humidade = 0;
-
-
     //GPS
-  
     double latitude = 0;
     double longitude = 0;
     bool gpsAtivo;
@@ -158,26 +140,13 @@ float sensorValue;
  
 
 //   ENTRA AQUI A PARTE DOS SENSORES COM LEDS
-void SensorLuminosidade() {     // precisa ser revisada
+void SensorLuminosidade() {
+  float frequencia = 0; // Substitua pela frequência medida do sensor
 
-    for (uint8_t i = 0; i < 10; i++)
-    {
-        uint32_t alto = pulseIn(pino, HIGH);
-        uint32_t baixo = pulseIn(pino, LOW);
+  float lux = 1.53e-3 * exp(6.27e-3 * frequencia);
 
-        periodos[i] = alto + baixo;
-    }
-    for (uint8_t i = 0; i < 10; i++)
-    {
-        soma += periodos[i];
-    
-    //    contador = 0;
-    }
-     float frequencia = 1000000.0 / (soma / 10.0);
-
-     Serial.print("frequencia do sinal");
-     Serial.print(frequencia);
-
+  Serial.print("Lux: ");
+  Serial.println(lux);
 }
 
 
@@ -311,6 +280,8 @@ void EnviarRegistros() {
         registroJson.set("humidade/humidade/unidade", "%");
         registroJson.set("humidade/temperatura/unidade", "°C");
         registroJson.set("humidade/temperatura/valor",registro.temperatura_h);
+
+        registroJson.set("direcao/direcao/valor", registro.direcaoVento);
 
 
         if (Firebase.RTDB.pushJSON(&firebaseData, String(FIREBASE_PATH) + "/leituras", &registroJson)) {
@@ -513,7 +484,10 @@ void salvarDados() {
         Serial.print(dados_finais.minuto);
         Serial.print(":");
         Serial.println(dados_finais.segundo);
-
+        Serial.print("Velocidade do vento: ");
+        Serial.println(dados_finais.velocidadeVento);
+        Serial.print("Direcao do vento: ");
+        Serial.println(dados_finais.direcaoVento);
         Serial.println("=================================");
 }
 void lerDados() {
@@ -668,99 +642,27 @@ void initTime() {
 
 }
 
-volatile uint32_t pulsosChuva = 0;
-volatile uint32_t ultimoPulsoUS = 0;
-volatile unsigned long ultimoPulsoChuva = 0;
+uint32_t pulsosChuva = 0;
+uint32_t ultimoPulsoChuva = 0;
 
-void IRAM_ATTR interrupcaoChuva()
-{
-    unsigned long agora = millis();
-
-    // Debounce
-    if ((agora - ultimoPulsoChuva) >= DEBOUNCE_MS)
-    {
-        pulsosChuva++;
-        ultimoPulsoChuva = agora;
-    }
-}
-//  FUNCAO PRECISA  SER  TESTADA
+int cont =0;
+int volume =0;
 void SensorVolumeChuva()
 {
-    if (!inicializado)
+    int valor = digitalRead(PINO_SENSOR);
+
+    if(valor == 1)
     {
-        pinMode(PINO_SENSOR, INPUT_PULLUP);
-        pcnt_config_t pcntConfig = {};
-
-        pcntConfig.pulse_gpio_num = PINO_SENSOR;
-        pcntConfig.ctrl_gpio_num = PCNT_PIN_NOT_USED;
-
-        pcntConfig.channel = PCNT_CHANNEL_0;
-        pcntConfig.unit = PCNT_UNIT_0;
-
-        // Conta somente na descida do sinal
-        pcntConfig.pos_mode = PCNT_COUNT_DIS;
-        pcntConfig.neg_mode = PCNT_COUNT_INC;
-
-        // Sem controle por outro GPIO
-        pcntConfig.lctrl_mode = PCNT_MODE_KEEP;
-        pcntConfig.hctrl_mode = PCNT_MODE_KEEP;
-
-        // Limites
-        pcntConfig.counter_h_lim = 32767;
-        pcntConfig.counter_l_lim = 0;
-
-        // Aplica configuração
-        pcnt_unit_config(&pcntConfig);
-
-        // Zera contador
-        pcnt_counter_pause(PCNT_UNIT_0);
-        pcnt_counter_clear(PCNT_UNIT_0);
-
-        // Começa a contar
-        pcnt_counter_resume(PCNT_UNIT_0);
-
-        inicializado = true;
-
-        Serial.println("Pluviometro iniciado");
-        Serial.println("1 pulso = 15 mL");
-        Serial.println("PCNT ativado");
-    }
-    int16_t pulsosAtuais = 0;
-
-    pcnt_get_counter_value(
-        PCNT_UNIT_0,
-        &pulsosAtuais
-    );
-    if (pulsosAtuais > pulsosProcessados)
-    {
-        unsigned long novosPulsos =
-            pulsosAtuais - pulsosProcessados;
-
-        pulsosProcessados = pulsosAtuais;
-
-        volumeML += novosPulsos * ML_POR_PULSO;
-
-        volumeLitros = volumeML / 1000.0;
-
-        Serial.println("--------------------------------");
-
-        Serial.print("Pulsos: ");
-        Serial.println(pulsosAtuais);
-
-        Serial.print("Novos pulsos: ");
-        Serial.println(novosPulsos);
-
-        Serial.print("Volume: ");
-        Serial.print(volumeML, 1);
-        Serial.println(" mL");
-
-        Serial.print("Volume: ");
-        Serial.print(volumeLitros, 3);
-        Serial.println(" L");
-
-        Serial.println("--------------------------------");
+        cont++;
+        Serial.println("valor lido");
+        Serial.println(valor);
+        volume = volume + 15;
+        Serial.println("valor de chuva");
+        Serial.println(volume);
+        delay(500);
     }
 }
+
 void calculaVelocidadeVento(float frequencia) {
   float velocidade = -0.114f + (1.17f * frequencia) - (0.268f * frequencia * frequencia);
 
@@ -775,46 +677,112 @@ void calculaVelocidadeVento(float frequencia) {
   Serial.print(velocidade, 2);
   Serial.println(" m/s");
 }
+// void SensorVelociadadeVento() {
+
+//    bool estadoAtual = digitalRead(PINO_SENSOR_VENTO);
+
+//   // Detecta borda de subida
+//   if (estadoAtual && !estadoAnterior) {
+
+//     uint32_t agora = micros();
+
+//     if (ultimoPulso) {
+//         pulsosVento++;
+
+
+//       // Calcula frequência
+//       float frequencia = 1000000.0 / (agora - ultimoPulso);
+
+//       // Salva no buffer circular
+//       freqBuffer[indice] = frequencia;
+//       indice = (indice + 1) % 10;
+
+//       if (amostras < 10)
+//         amostras++;
+
+//       // Calcula média
+//       float soma = 0;
+
+//       for (uint8_t i = 0; i < amostras; i++)
+//         soma += freqBuffer[i];
+
+//       float freqMedia = soma / amostras;
+
+//     //   Serial.print("Freq: ");
+//     //   Serial.print(freqMedia, 2);
+//     //   Serial.println(" Hz");
+
+//       calculaVelocidadeVento(freqMedia);
+//     }
+
+//     ultimoPulso = agora;
+//   }
+
+//   estadoAnterior = estadoAtual;
+// }
 void SensorVelociadadeVento() {
+  const uint32_t JANELA_MS = 15000;   // 15 s exclusivos para o vento
 
-   bool estadoAtual = digitalRead(PINO_SENSOR_VENTO);
+  uint32_t pulsos = 0;
+  uint32_t ultimoUs = 0;
+  bool ant = digitalRead(PINO_SENSOR_VENTO);
 
-  // Detecta borda de subida
-  if (estadoAtual && !estadoAnterior) {
+  Serial.println("Medindo vento (15 s)...");   // antes da janela
+  Serial.flush();                             // garante que terminou de enviar
 
-    uint32_t agora = micros();
+  uint32_t t0 = millis();
 
-    if (ultimoPulso) {
+  // ===== A PARTIR DAQUI: SÓ MONITORA O PINO =====
+  while (millis() - t0 < JANELA_MS) {
+    bool atual = digitalRead(PINO_SENSOR_VENTO);
 
-      // Calcula frequência
-      float frequencia = 1000000.0 / (agora - ultimoPulso);
+    if (atual && !ant) {                      // borda de subida
+      uint32_t agora = micros();
+      if (agora - ultimoUs > 2000) {          // debounce 2 ms
+        pulsos++;
+        ultimoUs = agora;
+      }
+    }
+    ant = atual;
+  }
+  // ===== FIM DA JANELA =====
 
-      // Salva no buffer circular
-      freqBuffer[indice] = frequencia;
-      indice = (indice + 1) % 10;
+  float frequencia = pulsos / (JANELA_MS / 1000.0f);   // Hz
 
-      if (amostras < 10)
-        amostras++;
+  Serial.printf("Pulsos: %u | Freq: %.2f Hz\n", pulsos, frequencia);
+  calculaVelocidadeVento(frequencia);          // original, intacta
+}
+void detectarDirecao() {
+  static bool ant[4] = {0, 0, 0, 0};
 
-      // Calcula média
-      float soma = 0;
+  const uint8_t p[4] = {34, 35,32,33}; // N, S, L, O
+  const char* d[4] = {"Norte", "Sul", "Leste", "Oeste"};
 
-      for (uint8_t i = 0; i < amostras; i++)
-        soma += freqBuffer[i];
+  for (int i = 0; i < 4; i++) {
+    bool v = analogRead(p[i]);
 
-      float freqMedia = soma / amostras;
+    Serial.printf("%s: %d | ", d[i], v);
 
-      Serial.print("Freq: ");
-      Serial.print(freqMedia, 2);
-      Serial.println(" Hz");
+    // Transição de alto para baixo
+    if (!v && ant[i]) {
+      const char* direcao = "";
 
-      calculaVelocidadeVento(freqMedia);
+      if (i == 0) direcao = "Norte";
+      if (i == 1) direcao = "Sul";
+      if (i == 2) direcao = "Leste";
+      if (i == 3) direcao = "Oeste";
+
+      Serial.printf("DIRECAO DETECTADA: %s\n", direcao);
+      dados_finais.direcaoVento = direcao;
+
+      // Aqui você pode enviar 'direcao' ao banco de dados.
+      // Exemplo: enviarDirecaoBanco(direcao);
     }
 
-    ultimoPulso = agora;
+    ant[i] = v;
   }
 
-  estadoAnterior = estadoAtual;
+  Serial.println();
 }
 void SensorHumidade() {
     temperatura = dht.readTemperature();
@@ -840,38 +808,20 @@ void SensorHumidade() {
 void setup() {
   dht.begin();
   pinMode(pinoLED, OUTPUT);
+  pinMode(PINO_SENSOR, INPUT);
+
   Serial.begin(9600); 
   analogReadResolution(12); // ESP32: 0–4095
   pinMode(PINO_SENSOR_VENTO, INPUT);
+  pinMode(PINO_SENSOR_LUZ, INPUT);
   SerialGPS.begin(GPS_BAUD,SERIAL_8N1,GPS_RX,GPS_TX);
   if (!LittleFS.begin(true)) {
         Serial.println("ERRO: falha ao montar LittleFS!");
         return;
   }
     Serial.println("LittleFS montado com sucesso!");
-    wifi(); 
+    wifi();  //wifi deve ser ligado depois da leitura dos sensores
 
-}
-// SENSOR DE DIRECAO DO VENTO
-
-void detectarDirecao() {
-  static bool ant[4] = {0, 0, 0, 0};
-  const uint8_t p[4] = {18, 19, 2, 4}; // N, S, L, O
-  const char* d[4] = {"Norte", "Sul", "Leste", "Oeste"};
-
-  for (int i = 0; i < 4; i++) {
-    bool v = digitalRead(p[i]);
-
-    Serial.printf("%s: %d | ", d[i], v);
-
-    if (v && !ant[i]) {
-      Serial.printf("DIRECAO: %s\n", d[i]);
-    }
-
-    ant[i] = v;
-  }
-
-  Serial.println();
 }
 void loop() {
    
@@ -879,20 +829,15 @@ void loop() {
     if (WiFi.status() == WL_CONNECTED) {
           
     }
-
     ConfigFirebase(FIREBASE_DATABASE_URL_2,FIREBASE_API_KEY_2,FIREBASE_AUTH_2);
     delay(1000);
-    initTime();
-    SensorHumidade(); //esta pronto //pino 5
-    SensorVolumeChuva();  // esta pronta
-    SensorVelociadadeVento();  // esta pronto
-    // SensorDirecaoVento();
-    // SensorLuminosidade(); // precisa ser calibrado
+    SensorVelociadadeVento();
+    SensorVolumeChuva();
+    detectarDirecao();  // pronto 
+    SensorLuminosidade(); // precisa ser calibrado
     SensorUv();  // esta pronto
     SensorPressaoAtm();   // esta pronto
     LerGps(); //esta pronto
-    // detectarDirecao(); // pronto
-    delay(1000);
 
     salvarDados();
     delay(1000);
@@ -910,3 +855,4 @@ void loop() {
     delay(1000);
 
 }
+
